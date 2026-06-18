@@ -10,4 +10,3 @@ Public mirror of selected articles by ikm-san.
 
 - This repository contains public, publish-ready article mirrors and public image assets only.
 - Draft notes, research, scripts, and private publishing workflow files stay in private repositories.
-- note.com remains the primary publishing surface unless an article says otherwise.

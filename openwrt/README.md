@@ -39,45 +39,6 @@ Public mirror of the OpenWrt and Linksys Velop WRT Pro 7 article series.
 - [APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】](032-ap-bridge-wds.md)
 - [WindowsとMacからSSHログイン: 初回接続から鍵認証まで【OpenWrt集中連載033】](033-ssh-login-windows-mac.md)
 
-## note.com Copy Sources
-
-Open each article directory and copy from the rendered GitHub README view. Image links are absolute public raw URLs; Markdown tables are replaced with public table images for note.com paste.
-
-- [LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】](readme-copy/000-hub-openwrt-guide/)
-- [OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか【OpenWrt集中連載001】](readme-copy/001-openwrt-intro/)
-- [日本でOpenWrt系Wi‑Fiルーターを使う時に技適をどう考えるか【OpenWrt集中連載002】](readme-copy/002-japan-technical-conformity/)
-- [LN6001-JPとは何か: OpenWrtベースWi‑Fi 7ルーターの立ち位置【OpenWrt集中連載003】](readme-copy/003-ln6001-product-positioning/)
-- [LN6001-JP初期設定チェックリスト: 買って最初に確認すること【OpenWrt集中連載004】](readme-copy/004-initial-setup-checklist/)
-- [LuCIとSSHの基本: LN6001-JPで最初に触る画面とコマンド【OpenWrt集中連載005】](readme-copy/005-luci-ssh-basics/)
-- [LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】](readme-copy/006-wifi-band-settings/)
-- [ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】](readme-copy/007-guest-wifi/)
-- [DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】](readme-copy/008-dns-adblock/)
-- [LN6001-JPが快適な理由: ハードウェアアクセラレーションを理解する【OpenWrt集中連載009】](readme-copy/009-sqm-latency/)
-- [家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】](readme-copy/010-family-filtering/)
-- [VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】](readme-copy/011-vlan-office-guest/)
-- [固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】](readme-copy/012-dhcp-reservations/)
-- [WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】](readme-copy/013-wireguard-tailscale-remote/)
-- [NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか【OpenWrt集中連載014】](readme-copy/014-ipoe-ipv4-over-ipv6/)
-- [監視とログ: 小規模オフィスで見るべき最低限の情報【OpenWrt集中連載015】](readme-copy/015-monitoring-logs/)
-- [firewall zonesの考え方: LAN/Guest/VPNを分ける基本【OpenWrt集中連載016】](readme-copy/016-firewall-zones/)
-- [ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】](readme-copy/017-port-forwarding-caution/)
-- [Tailscaleの使いどころ: VPNを自分で持つか任せるか【OpenWrt集中連載018】](readme-copy/018-tailscale-zerotier-use/)
-- [IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】](readme-copy/019-ipv6-pitfalls/)
-- [ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】](readme-copy/020-firmware-update/)
-- [つながらない時の切り分け: WAN/LAN/DNS/Wi-Fiを分けて見る【OpenWrt集中連載021】](readme-copy/021-troubleshooting-connectivity/)
-- [リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】](readme-copy/022-reset-recovery/)
-- [バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】](readme-copy/023-backup-restore/)
-- [パッケージ管理: opkgでできることとできないこと【OpenWrt集中連載024】](readme-copy/024-package-management/)
-- [SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】](readme-copy/025-ssh-basic-commands/)
-- [ハードウェア概要: LN6001-JPのポート・LED・ボタンの見方【OpenWrt集中連載026】](readme-copy/026-hardware-overview/)
-- [自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】](readme-copy/027-home-configuration/)
-- [VPN設定まとめ: WireGuard・Tailscaleの選び方と導入手順【OpenWrt集中連載028】](readme-copy/028-vpn-configuration/)
-- [小規模店舗での設定例: スタッフ・お客様・機器を分けて管理する【OpenWrt集中連載029】](readme-copy/029-store-configuration/)
-- [LN6001-JPレビュー: こんな人に向いている・向いていない【OpenWrt集中連載030】](readme-copy/030-ln6001-review-fit/)
-- [MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】](readme-copy/031-mlo-setup/)
-- [APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】](readme-copy/032-ap-bridge-wds/)
-- [WindowsとMacからSSHログイン: 初回接続から鍵認証まで【OpenWrt集中連載033】](readme-copy/033-ssh-login-windows-mac/)
-
 ## Assets
 
 Images used by these articles are stored under `assets/<article-id>/`.
