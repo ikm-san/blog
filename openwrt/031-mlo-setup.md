@@ -202,7 +202,8 @@ uci show wireless | grep -Ei 'mlo|ssid|encryption|key'
 # 接続中の端末と使用バンドを確認
 # 実際のwlan名は iw dev で確認
 iw dev
-iw dev <wlan名> station dump
+WLAN_IF="ath00"  # iw devで表示されたInterface名に置き換える
+iw dev "$WLAN_IF" station dump
 
 # ログ確認
 logread | grep -Ei 'wifi|hostapd|mlo' | tail -n 100

@@ -42,7 +42,7 @@
 <h2>Linksys公式VPNアシスタントモジュールの取得</h2>
 <p>WireGuard・Tailscaleは、まずLinksys公式サポートページからVPN Assistantモジュールを入手して設定します。</p>
 <p>WireGuardについては上級者向けに関連パッケージを個別導入する公式手順もありますが、順番指定があるため、通常はVPN Assistantを使うほうが安全です。</p>
-<ol><li>https://support.linksys.com/kb/article/8723-jp/ にアクセス</li><li>LN6001-JP向けのVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCI: <strong>System</strong> → <strong>Software</strong> で <strong>Update lists</strong> を実行</li><li><strong>Upload Package</strong> から <code>.ipk</code> をアップロードして <strong>Install</strong></li><li>完了後にルーターを再起動し、LuCIを開き直す</li><li><strong>Services</strong> メニューに <strong>VPN Assistant</strong> が追加される</li></ol>
+<ol><li>https://support.linksys.com/kb/article/8723-jp/ にアクセス</li><li>LN6001-JP向けのVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCI: **System** → **Software** で **Update lists** を実行</li><li>**Upload Package** から <code>.ipk</code> をアップロードして **Install**</li><li>完了後にルーターを再起動し、LuCIを開き直す</li><li>**Services** メニューに **VPN Assistant** が追加される</li></ol>
 <p>最初は「LuCIから動く状態を作る」ことを優先するほうが整理しやすくなります。</p>
 <p>インストール前後の状態は、SSHから次のように確認できます。</p>
 <pre><code class="language-sh">BACKUP_DIR=&quot;/root/vpn-assistant-before-$(date +%Y%m%d-%H%M)&quot;
@@ -56,7 +56,7 @@ opkg list-installed | grep -E &#x27;vpn|wireguard|tailscale&#x27; &gt; &quot;$BA
 opkg list-installed | grep -E &#x27;vpn|wireguard|tailscale&#x27;
 ls /etc/init.d | grep -E &#x27;tailscale|wireguard|vpn&#x27; || true
 logread | grep -i &#x27;vpn\|wireguard\|tailscale&#x27; | tail -n 80</code></pre>
-<p>公式手順では、LuCIの <strong>System</strong> → <strong>Software</strong> からVPN AssistantのIPKをアップロードし、完了後に再起動して <strong>Services</strong> メニューに追加されたことを確認します。</p>
+<p>公式手順では、LuCIの **System** → **Software** からVPN AssistantのIPKをアップロードし、完了後に再起動して **Services** メニューに追加されたことを確認します。</p>
 <p>CLI確認は、公式UI手順が終わった後の状態確認として使う位置づけです。</p>
 <p>---</p>
 <h2>WireGuardの導入手順（概要）</h2>
@@ -74,7 +74,7 @@ uci show firewall | grep -E &#x27;wireguard|tailscale|51820|redirect&#x27;</code
 <p>最初は「固定IPなのか」「動的IPなのか」を分けるだけでもかなり役立ちます。</p>
 <ul><li>固定IPがある場合: Endpointとして直接使用</li><li>動的IPの場合: DynDNSサービス（ddns-scripts等）を使うか、Tailscaleへ切り替える</li></ul>
 <h3>VPN AssistantでのWireGuard設定（モジュールインストール後）</h3>
-<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>WireGuard Server</strong> タブを開く</li><li><strong>Enable WireGuard VPN</strong> を有効にする</li><li>必要なサーバー設定を入力し、<strong>Save &amp; Apply</strong></li><li>設定反映後、ルーターを一度再起動</li><li><strong>Client Peers</strong> の <strong>Show QR</strong> からクライアント用QRコードまたはテキスト設定を取得</li></ol>
+<ol><li>**Services** → **VPN Assistant** を開く</li><li>**WireGuard Server** タブを開く</li><li>**Enable WireGuard VPN** を有効にする</li><li>必要なサーバー設定を入力し、**Save &amp; Apply**</li><li>設定反映後、ルーターを一度再起動</li><li>**Client Peers** の **Show QR** からクライアント用QRコードまたはテキスト設定を取得</li></ol>
 <p>最初はスマートフォン1台だけ接続確認するほうが切り分けしやすくなります。</p>
 <h3>ファイアウォール設定（手動構成する場合）</h3>
 <p>VPN Assistantを使う場合は、まず公式UIで反映された設定を確認します。以下はWireGuardを手動構成する場合の参考例です。</p>
@@ -110,7 +110,11 @@ PersistentKeepalive = 25</code></pre>
 <p>最初は「NASだけ」「管理画面だけ」のように、AllowedIPsを必要最小限へ絞るほうが安全です。</p>
 <h3>動作確認</h3>
 <pre><code class="language-sh"># WireGuardの状態確認
-wg show
+if command -v wg &gt;/dev/null; then
+  wg show
+else
+  echo &quot;wg command is not installed&quot;
+fi
 
 # ルーター側の設定とログ確認
 uci show network | grep -i wireguard
@@ -121,20 +125,27 @@ logread | grep -i wireguard | tail -n 80</code></pre>
 <h2>Tailscaleの導入手順（概要）</h2>
 <p>Tailscaleは、「固定IPなし」「IPoE環境」「ポート開放が難しい」ケースとかなり相性があります。</p>
 <h3>インストール（公式モジュール経由）</h3>
-<ol><li>https://support.linksys.com/kb/article/8723-jp/ からモジュールを取得</li><li>LuCI: <strong>System</strong> → <strong>Software</strong> → <strong>Upload Package</strong> からインストール</li></ol>
+<ol><li>https://support.linksys.com/kb/article/8723-jp/ からモジュールを取得</li><li>LuCI: **System** → **Software** → **Upload Package** からインストール</li></ol>
 <p>最初は、VPN Assistant経由でLuCIから動かすほうが切り分けしやすくなります。</p>
 <h3>初期設定</h3>
-<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>Tailscale</strong> タブで <strong>Enable Tailscale Service</strong> を有効化</li><li>ルーターをExit Nodeにしたい場合は <strong>Advertise as Exit Node</strong> を選択</li><li>表示される認証URLをブラウザで開いてTailscaleアカウントに登録</li><li>必要に応じてTailscale管理コンソール（https://login.tailscale.com/admin/routes）でルートやExit Nodeを承認</li></ol>
+<ol><li>**Services** → **VPN Assistant** を開く</li><li>**Tailscale** タブで **Enable Tailscale Service** を有効化</li><li>ルーターをExit Nodeにしたい場合は **Advertise as Exit Node** を選択</li><li>表示される認証URLをブラウザで開いてTailscaleアカウントに登録</li><li>必要に応じてTailscale管理コンソール（https://login.tailscale.com/admin/routes）でルートやExit Nodeを承認</li></ol>
 <p>最初は「スマートフォン1台だけ接続確認する」くらいでも十分役立ちます。</p>
 <p>CLIの <code>tailscale status</code> は、設定後の状態確認でまず最初に確認したいコマンドです。</p>
 <pre><code class="language-sh"># Tailscale関連パッケージとサービス状態
 opkg list-installed | grep -E &#x27;tailscale|vpn&#x27;
-/etc/init.d/tailscale status
+[ -x /etc/init.d/tailscale ] &amp;&amp; /etc/init.d/tailscale status
 
 # 認証後の状態確認
-tailscale status
-tailscale ip -4
-tailscale ip -6
+if command -v tailscale &gt;/dev/null; then
+  if tailscale status; then
+    tailscale ip -4
+    tailscale ip -6
+  else
+    echo &quot;tailscaled is not running or not authenticated yet&quot;
+  fi
+else
+  echo &quot;tailscale command is not installed&quot;
+fi
 logread | grep -i tailscale | tail -n 80</code></pre>
 <p>公式手順では、Tailscale有効化後に認証URLを開き、最後にOKを押すとログアウトしてルーターが再起動します。</p>
 <p>数分待ってから <code>tailscale status</code> を確認すると、認証や接続の切り分けがしやすくなります。</p>
@@ -150,10 +161,10 @@ ip route show
 ip -6 route show
 
 # Tailscale利用時は広告ルートと端末一覧を確認
-tailscale status 2&gt;/dev/null || true
+command -v tailscale &gt;/dev/null &amp;&amp; tailscale status || true
 
 # WireGuard利用時はpeerとallowed ipsを確認
-wg show 2&gt;/dev/null || true</code></pre>
+command -v wg &gt;/dev/null &amp;&amp; wg show</code></pre>
 <p><code>0.0.0.0/0</code> や <code>::/0</code> は全通信をVPNへ流す設定です。</p>
 <p>必要な場面では便利ですが、最初から使うと切り分けが難しくなるため、まずはLAN内の必要な範囲だけを指定するほうが安全です。</p>
 <p>---</p>
@@ -162,17 +173,28 @@ wg show 2&gt;/dev/null || true</code></pre>
 <p>最初の成功条件としては、次の3つが見えれば十分です。最初はここまで確認できれば大きく外していません。</p>
 <ul><li>スマートフォンやPCから接続できる</li><li>必要なLAN機器だけへ届く</li><li>使っていない経路や端末まで広く開いていない</li></ul>
 <h3>WireGuardの場合</h3>
-<ul><li>秘密鍵（Private Key）は設定バックアップへ含まれるため、バックアップは暗号化して保管する</li><li>端末を紛失した場合はLuCIの <strong>Peers</strong> タブからその端末公開鍵を削除する</li></ul>
+<ul><li>秘密鍵（Private Key）は設定バックアップへ含まれるため、バックアップは暗号化して保管する</li><li>端末を紛失した場合はLuCIの **Peers** タブからその端末公開鍵を削除する</li></ul>
 <pre><code class="language-sh"># WireGuard peerの棚卸し
-wg show
+if command -v wg &gt;/dev/null; then
+  wg show
+else
+  echo &quot;wg command is not installed&quot;
+fi
 
 # firewall上でWireGuardに関係するルールを確認
 uci show firewall | grep -i wireguard</code></pre>
 <h3>Tailscaleの場合</h3>
 <ul><li>Tailscale管理コンソール（https://login.tailscale.com/admin/machines）で端末を管理する</li><li>退職・紛失時はコンソールからデバイスを削除・無効化する</li><li>管理アカウントへ二要素認証を設定する</li></ul>
 <pre><code class="language-sh"># Tailscale参加端末と自分のIPを確認
-tailscale status
-tailscale ip -4
+if command -v tailscale &gt;/dev/null; then
+  if tailscale status; then
+    tailscale ip -4
+  else
+    echo &quot;tailscaled is not running or not authenticated yet&quot;
+  fi
+else
+  echo &quot;tailscale command is not installed&quot;
+fi
 
 # Tailscale関連ログ
 logread | grep -i tailscale | tail -n 80</code></pre>

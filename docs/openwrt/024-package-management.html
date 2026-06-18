@@ -16,7 +16,7 @@
 <p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
 <h2>要約</h2>
 <p>LN6001-JPはOpenWrtベースのため、<code>opkg</code> パッケージマネージャーを使って機能を追加できます。</p>
-<p>adblock、tcpdump、監視ツールなどを追加できる一方で、ストレージ容量や依存関係、ファームウェア更新時の再インストールも意識する必要があります。</p>
+<p>tcpdumpや一部のLuCI拡張などを追加できる一方で、ストレージ容量や依存関係、ファームウェア更新時の再インストールも意識する必要があります。</p>
 <p>ただし、最初から大量のパッケージを管理しなくても大丈夫です。</p>
 <p>まずは「空き容量を見る」「更新前に一覧を保存する」「よく分からないパッケージを入れすぎない」だけでも、かなり安全に運用しやすくなります。</p>
 <p>WireGuardとTailscaleは、Linksys公式VPNアシスタントモジュールが案内されています。</p>
@@ -25,7 +25,7 @@
 <h2>この記事でわかること</h2>
 <ul><li>LN6001-JPで <code>opkg</code> で入れてよいものと注意が必要なもの</li><li>パッケージ追加前に確認したい空き容量</li><li>ファームウェア更新後に戻しやすくする準備</li><li>Linksys公式モジュールを優先したほうがよいケース</li></ul>
 <h2>こんな人に向いています</h2>
-<ul><li>adblockを追加したいが、入れてよいか不安</li><li><code>opkg</code> で何でも入れてよいのか判断に迷っている</li><li>更新後にパッケージが消える前提で整理しておきたい</li></ul>
+<ul><li>追加パッケージを入れてよいか不安</li><li><code>opkg</code> で何でも入れてよいのか判断に迷っている</li><li>更新後にパッケージが消える前提で整理しておきたい</li></ul>
 <figure><img src="/blog/openwrt/assets/024/diagram-02.png" alt="考え方はシンプル"></figure>
 <h2>まずはここまでで十分</h2>
 <p>パッケージ管理も、最初から複雑に考えなくて大丈夫です。</p>
@@ -44,25 +44,27 @@ df -h
 opkg update
 
 # パッケージを検索
-opkg list | grep &lt;キーワード&gt;
-opkg list | grep adblock
+PACKAGE_KEYWORD=&quot;tcpdump&quot;
+opkg list | grep &quot;$PACKAGE_KEYWORD&quot;
+opkg list | grep tcpdump
 
 # パッケージをインストール
-opkg install &lt;パッケージ名&gt;
-opkg install adblock luci-app-adblock
+PACKAGE_NAME=&quot;tcpdump&quot;
+opkg install &quot;$PACKAGE_NAME&quot;
 
 # パッケージをアンインストール
-opkg remove &lt;パッケージ名&gt;
-opkg remove adblock
+PACKAGE_NAME=&quot;tcpdump&quot;
+opkg remove &quot;$PACKAGE_NAME&quot;
 
 # インストール済みパッケージの一覧
 opkg list-installed
 
 # パッケージの詳細情報
-opkg info &lt;パッケージ名&gt;
+PACKAGE_NAME=&quot;tcpdump&quot;
+opkg info &quot;$PACKAGE_NAME&quot;
 
 # パッケージが配置したファイルを確認
-opkg files &lt;パッケージ名&gt;
+opkg files &quot;$PACKAGE_NAME&quot;
 
 # ストレージ容量の確認
 df -h</code></pre>
@@ -80,35 +82,29 @@ opkg list-upgradable &gt; &quot;$BACKUP_DIR/opkg-list-upgradable.txt&quot; 2&gt;
 ubus call system board &gt; &quot;$BACKUP_DIR/system-board.json&quot;
 
 # /overlayの使用量に特に注目
-Filesystem       Size  Used Available Use% Mounted on
-overlayfs:/overlay 100.0M  60.0M  40.0M  60% /</code></pre>
+df -h | grep overlay</code></pre>
 <p><code>/overlay</code> の空き容量が少ない（10MB未満など）場合は、不要パッケージをアンインストールしてから進めます。</p>
 <p>最初は「容量に余裕があるか」を確認するだけでもかなり役立ちます。</p>
 <p>最初は、「トラブル切り分けに役立つもの」や「普段の運用を楽にするもの」から追加するほうが整理しやすくなります。</p>
-<table><thead><tr><th>パッケージ</th><th>機能</th><th>合わせてインストール</th></tr></thead><tbody><tr><td><code>adblock</code></td><td>広告・マルウェアドメインブロック</td><td><code>luci-app-adblock</code></td></tr><tr><td><code>htop</code></td><td>プロセス・メモリ監視</td><td>なし</td></tr><tr><td><code>tcpdump</code></td><td>パケットキャプチャ</td><td>なし</td></tr><tr><td><code>bind-dig</code></td><td><code>dig</code>コマンド（DNS確認）</td><td>なし</td></tr></tbody></table>
-<p>最初は、adblock や tcpdump のような「用途が明確なもの」から追加するほうが安全です。</p>
+<table><thead><tr><th>パッケージ</th><th>機能</th><th>合わせてインストール</th></tr></thead><tbody><tr><td><code>tcpdump</code></td><td>パケットキャプチャ</td><td>なし</td></tr><tr><td><code>curl</code></td><td>HTTP通信確認・スクリプト取得</td><td>なし</td></tr><tr><td><code>luci-app-ddns</code></td><td>DDNS設定UI</td><td>なし</td></tr></tbody></table>
+<p>最初は、tcpdump のような「用途が明確で、インストール後に何を確認したいかが分かっているもの」から追加するほうが安全です。</p>
 <p>WireGuard/Tailscaleは、Linksys公式サポートのVPNアシスタントモジュールを使います。</p>
 <p>VPN系は、まず公式手順を優先したほうが切り分けしやすくなります。</p>
 <p>最初は、LuCI対応パッケージを一緒に入れると状態確認しやすくなります。</p>
-<h2>インストール例: adblock</h2>
+<h2>インストール例: tcpdump</h2>
 <pre><code class="language-sh"># パッケージリスト更新
 opkg update
 
-# adblockとLuCI用UIをインストール
-opkg install adblock luci-app-adblock
+# tcpdumpをインストール
+opkg install tcpdump
 
 # インストール確認
-opkg list-installed | grep adblock
-opkg files adblock | head
+opkg list-installed | grep tcpdump
+opkg files tcpdump | head
 
-# サービス起動
-/etc/init.d/adblock enable
-/etc/init.d/adblock start
-
-# 状態とログ確認
-/etc/init.d/adblock status
-logread | grep -i adblock | tail -n 80</code></pre>
-<p>最初は「インストールできたか」「LuCIへメニューが出るか」を確認できれば十分です。</p>
+# 使い方確認
+tcpdump --help | head</code></pre>
+<p>最初は「インストールできたか」「コマンドが起動するか」を確認できれば十分です。</p>
 <p>OpenWrt系では、「設定は残るが追加パッケージ本体は消える」ケースがあります。</p>
 <h2>インストール済みパッケージの保存（ファームウェアアップデート前に必須）</h2>
 <p>ファームウェアアップデート後は、opkgでインストールしたパッケージが消えることがあります（設定ファイルは残る場合あり）。</p>
@@ -122,12 +118,12 @@ scp root@192.168.1.1:/tmp/installed-packages-20260618-1200.txt ~/Downloads/</cod
 <p>ファームウェアアップデート後の再インストール:</p>
 <pre><code class="language-sh">opkg update
 # 保存したリストを参照しながら主要パッケージを再インストール
-opkg install adblock luci-app-adblock
+opkg install tcpdump
 
 # 戻したあとに確認
-opkg list-installed | grep -E &#x27;adblock|luci-app-adblock&#x27;
-/etc/init.d/adblock status</code></pre>
-<p>最初は「Adblock」「VPN」「IPoE関連」が戻るかを優先確認すると整理しやすくなります。</p>
+opkg list-installed | grep tcpdump
+tcpdump --help | head</code></pre>
+<p>最初は「実際に追加したパッケージ」「VPN」「IPoE関連」が戻るかを優先確認すると整理しやすくなります。</p>
 <p><code>opkg</code> は便利ですが、「普通のLinux PC」と同じ感覚で大量導入すると整理しにくくなることがあります。</p>
 <h2>opkgの注意事項</h2>
 <table><thead><tr><th>注意事項</th><th>詳細</th></tr></thead><tbody><tr><td>ファームウェアアップデートで消える</td><td>opkgインストールのバイナリはアップデートで消える。設定（/etc/config/）は残る場合がある</td></tr><tr><td>ストレージ容量</td><td>約100MBのoverlayストレージ。大量のパッケージは入れない</td></tr><tr><td>カーネルモジュール</td><td><code>kmod-*</code> はファームウェアカーネルバージョンに依存。バージョン不一致でインストール不可の場合あり</td></tr><tr><td><code>opkg update</code> を忘れない</td><td>一度もupdateせずにinstallを実行するとエラーになる</td></tr><tr><td>LuCI拡張は再起動が必要</td><td><code>luci-app-*</code> インストール後はLuCIページをリロードするか、uhttpdを再起動する</td></tr></tbody></table>
@@ -139,8 +135,9 @@ opkg list-installed | grep -E &#x27;adblock|luci-app-adblock&#x27;
 <h2>アンインストール前後の確認</h2>
 <p>不要になったパッケージを消す時も、いきなり削除するより「何を消すか」を先に見ます。</p>
 <pre><code class="language-sh"># 対象パッケージの情報と配置ファイルを確認
-opkg info &lt;パッケージ名&gt;
-opkg files &lt;パッケージ名&gt;
+PACKAGE_NAME=&quot;tcpdump&quot;
+opkg info &quot;$PACKAGE_NAME&quot;
+opkg files &quot;$PACKAGE_NAME&quot;
 
 # 設定ファイルがある場合は先に保存
 BACKUP_DIR=&quot;/root/remove-package-before-$(date +%Y%m%d-%H%M)&quot;
@@ -149,10 +146,10 @@ cp -a /etc/config &quot;$BACKUP_DIR/etc-config&quot;
 opkg list-installed &gt; &quot;$BACKUP_DIR/opkg-before.txt&quot;
 
 # パッケージ削除
-opkg remove &lt;パッケージ名&gt;
+opkg remove &quot;$PACKAGE_NAME&quot;
 
 # 削除後の確認
-opkg list-installed | grep &lt;パッケージ名&gt; || true
+opkg list-installed | grep &quot;$PACKAGE_NAME&quot; || true
 df -h
 logread | tail -n 80</code></pre>
 <p>OpenWrtでは、設定ファイルだけ残る場合があります。</p>
@@ -162,8 +159,9 @@ logread | tail -n 80</code></pre>
 <ul><li>空き容量に余裕がある</li><li>依存関係エラーなしでインストールできる</li><li>LuCI拡張なら画面更新後にメニューへ出てくる</li></ul>
 <pre><code class="language-sh"># エラー: Cannot satisfy dependencies
 # → opkg updateを先に実行
+PACKAGE_NAME=&quot;tcpdump&quot;
 opkg update
-opkg install &lt;パッケージ名&gt;
+opkg install &quot;$PACKAGE_NAME&quot;
 
 # エラー: kmod-xxx conflicts with installed kmod
 # → カーネルバージョン不一致。ファームウェアバージョンを確認
@@ -171,14 +169,15 @@ ubus call system board | grep kernel
 
 # エラー: No space left on device
 # → 不要なパッケージをアンインストール
-opkg remove &lt;不要パッケージ&gt;
+UNNEEDED_PACKAGE=&quot;example-package&quot;
+opkg remove &quot;$UNNEEDED_PACKAGE&quot;
 df -h  # 空き容量再確認
 
 # どのパッケージを最近入れたか確認
 opkg list-installed | tail -n 50</code></pre>
 <p>最初は「容量不足か」「update不足か」を分けるだけでもかなり切り分けしやすくなります。</p>
 <h2>まとめ</h2>
-<ol><li>パッケージ追加前は <code>opkg update</code> を実行する</li><li><code>df -h</code> でストレージ空き容量を確認する</li><li>adblock や tcpdump など用途が明確なものから追加する</li><li>ファームウェア更新前は <code>opkg list-installed</code> をPCへ保存する</li><li>WireGuard/TailscaleはLinksys公式VPNアシスタントモジュールを優先する</li><li><code>luci-app-*</code> インストール後はLuCIを再読み込みする</li></ol>
+<ol><li>パッケージ追加前は <code>opkg update</code> を実行する</li><li><code>df -h</code> でストレージ空き容量を確認する</li><li>tcpdump など用途が明確なものから追加する</li><li>ファームウェア更新前は <code>opkg list-installed</code> をPCへ保存する</li><li>WireGuard/TailscaleはLinksys公式VPNアシスタントモジュールを優先する</li><li><code>luci-app-*</code> インストール後はLuCIを再読み込みする</li></ol>
 <p><code>opkg</code> は、LN6001-JPへ機能を追加できる強力な仕組みです。</p>
 <p>ただし、「何でも大量に入れる」より、「必要なものだけ追加する」ほうが整理しやすくなります。</p>
 <p>最初は「空き容量確認」「一覧保存」「主要パッケージだけ導入」を意識するだけでも、かなり安全に運用しやすくなります。</p>

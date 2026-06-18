@@ -45,7 +45,7 @@
 <h3>Linksys公式VPNアシスタントモジュールのインストール</h3>
 <p>Tailscaleは <code>opkg install tailscale</code> ではインストールできません。</p>
 <p>必ずLinksys公式サポートページ（https://support.linksys.com/kb/article/8723-jp/）からVPNアシスタントモジュールを入手してください。</p>
-<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開き、<strong>Update lists</strong> を実行</li><li><strong>Upload Package</strong> からダウンロードしたファイルを選択して <strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li>完了後にルーターを再起動し、LuCIを開き直す（<strong>Services</strong> に <strong>VPN Assistant</strong> が追加される）</li></ol>
+<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで **System** → **Software** を開き、**Update lists** を実行</li><li>**Upload Package** からダウンロードしたファイルを選択して **Upload**</li><li>確認画面で **Install** をクリック</li><li>完了後にルーターを再起動し、LuCIを開き直す（**Services** に **VPN Assistant** が追加される）</li></ol>
 <p>最初はLuCI上で動く状態を作ってからCLI確認へ進むほうが、構成を理解しやすくなります。</p>
 <p>インストール前に、既存のnetwork/firewall設定とパッケージ状態を保存しておくと、後から切り戻しや確認がしやすくなります。</p>
 <pre><code class="language-sh">BACKUP_DIR=&quot;/root/vpn-before-$(date +%Y%m%d-%H%M)&quot;
@@ -60,7 +60,7 @@ opkg list-installed | grep -E &#x27;tailscale|wireguard|vpn&#x27; &gt; &quot;$BA
 
 echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
 <h3>Tailscaleへの接続</h3>
-<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>Tailscale</strong> タブへ移動する</li><li><strong>Enable Tailscale Service</strong> を有効にする</li><li>必要に応じて <strong>Advertise as Exit Node</strong> を選ぶ</li><li>認証用URLが表示されたらブラウザで開き、Tailscaleアカウントで登録する</li><li>最後に <strong>OK</strong> をクリックし、ルーターの再起動を待つ</li><li>再起動後、必要に応じてSSHから <code>tailscale status</code> で状態を確認する</li></ol>
+<ol><li>**Services** → **VPN Assistant** を開く</li><li>**Tailscale** タブへ移動する</li><li>**Enable Tailscale Service** を有効にする</li><li>必要に応じて **Advertise as Exit Node** を選ぶ</li><li>認証用URLが表示されたらブラウザで開き、Tailscaleアカウントで登録する</li><li>最後に **OK** をクリックし、ルーターの再起動を待つ</li><li>再起動後、必要に応じてSSHから <code>tailscale status</code> で状態を確認する</li></ol>
 <p>最初はスマートフォン1台だけ接続確認するほうが切り分けしやすくなります。</p>
 <p>問題なくつながることを確認してから、PCや他端末を追加するほうが安全です。</p>
 <h3>LAN全体をTailscaleから見えるようにする</h3>
@@ -69,33 +69,44 @@ echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
 <p>最初はLAN全体ではなく、「NASだけ」「管理セグメントだけ」くらいから始めるほうが整理しやすくなります。</p>
 <h3>接続確認</h3>
 <pre><code class="language-sh"># Tailscaleの接続状態と参加端末を確認
-tailscale status
+if command -v tailscale &gt;/dev/null; then
+  if tailscale status; then
+    # LN6001-JP自身のTailscale IPアドレスを確認
+    tailscale ip -4
+    tailscale ip -6
 
-# LN6001-JP自身のTailscale IPアドレスを確認
-tailscale ip -4
-tailscale ip -6
-
-# 特定のノードへのpingテスト
-tailscale ping &lt;接続先ノード名&gt;
+    # 特定のノードへのpingテスト
+    TAILSCALE_NODE=&quot;example-node&quot;
+    tailscale ping &quot;$TAILSCALE_NODE&quot;
+  else
+    echo &quot;tailscaled is not running or not authenticated yet&quot;
+  fi
+else
+  echo &quot;tailscale command is not installed&quot;
+fi
 
 # サービス状態とログ確認
-/etc/init.d/tailscale status
+[ -x /etc/init.d/tailscale ] &amp;&amp; /etc/init.d/tailscale status
 logread | grep -i tailscale | tail -n 80</code></pre>
 <p><code>tailscale status</code> は、まず最初に確認したいコマンドです。</p>
 <p>CLIは、最初は設定変更より「どの端末が見えているか」を確認する用途で使うくらいでも十分です。</p>
 <h3>Tailscaleの無効化・削除</h3>
 <pre><code class="language-sh"># Tailscaleネットワークから抜ける
-tailscale logout
+if command -v tailscale &gt;/dev/null; then
+  tailscale logout
+fi
 
 # 自動起動を無効化
-/etc/init.d/tailscale disable
-/etc/init.d/tailscale stop</code></pre>
+if [ -x /etc/init.d/tailscale ]; then
+  /etc/init.d/tailscale disable
+  /etc/init.d/tailscale stop
+fi</code></pre>
 <p>不要になったVPN設定を残しっぱなしにしないことも、安全運用ではかなり重要です。</p>
 <h2>WireGuardとの組み合わせ</h2>
 <p>Tailscaleがサービス依存になることを避けたい場合はWireGuardを使います。</p>
 <p>WireGuardの設定は Article 013 で詳しく解説しています。</p>
 <p>2つの方式を使い分ける設計例:</p>
-<ul><li><strong>メインのリモートアクセス</strong>: Tailscale（固定IPが不要、端末管理が楽）</li><li><strong>拠点間の常時接続</strong>: WireGuard（安定した専用トンネル）</li></ul>
+<ul><li>**メインのリモートアクセス**: Tailscale（固定IPが不要、端末管理が楽）</li><li>**拠点間の常時接続**: WireGuard（安定した専用トンネル）</li></ul>
 <p>最初から両方を同時に大規模運用するより、「まず1つを安定させる」ほうが切り分けしやすくなります。</p>
 <p>VPNは、「つながること」だけでなく、「どこまでアクセスできるか」もかなり重要です。</p>
 <h2>ファイアウォールとアクセス範囲の設計</h2>
@@ -158,7 +169,8 @@ uci show firewall | grep -A 8 &quot;name=&#x27;vpn&#x27;&quot;</code></pre>
 opkg list-installed | grep -E &#x27;tailscale|wireguard&#x27;
 
 # Tailscaleサービスとログを確認
-/etc/init.d/tailscale status
+[ -x /etc/init.d/tailscale ] &amp;&amp; /etc/init.d/tailscale status
+command -v tailscale &gt;/dev/null &amp;&amp; tailscale status
 logread | grep -i tailscale | tail -n 80
 
 # インターフェース一覧を確認
@@ -179,7 +191,7 @@ tailscale status &gt; &quot;$BACKUP_DIR/tailscale-status.txt&quot; 2&gt;/dev/nul
 <p>Tailscaleの認証情報やWireGuardの秘密鍵に相当する情報が含まれる場合があるため、バックアップファイルは外部にそのまま共有しないようにします。</p>
 <h2>まとめ</h2>
 <p>Tailscaleは、「固定IPやポート開放なしで安全に入りたい」用途とかなり相性があります。</p>
-<ol><li>Linksys公式VPNアシスタントモジュール（https://support.linksys.com/kb/article/8723-jp/）をLuCI経由でインストール</li><li><strong>Services</strong> → <strong>VPN Assistant</strong> → <strong>Tailscale</strong> で有効化</li><li>表示された認証URLからTailscaleアカウントへ登録</li><li>まずスマートフォン1台だけ接続確認する</li><li>必要に応じて管理コンソールでルートやExit Nodeを承認する</li><li>SSHの <code>tailscale status</code> で状態確認する</li></ol>
+<ol><li>Linksys公式VPNアシスタントモジュール（https://support.linksys.com/kb/article/8723-jp/）をLuCI経由でインストール</li><li>**Services** → **VPN Assistant** → **Tailscale** で有効化</li><li>表示された認証URLからTailscaleアカウントへ登録</li><li>まずスマートフォン1台だけ接続確認する</li><li>必要に応じて管理コンソールでルートやExit Nodeを承認する</li><li>SSHの <code>tailscale status</code> で状態確認する</li></ol>
 <p>固定IPやポート開放が難しいIPoE環境では、Tailscaleはかなり有力な選択肢です。</p>
 <p>一方で、「自前で入口を管理したい」「外部サービス依存を減らしたい」場合はWireGuardが向いています。</p>
 <p>最初からLAN全体を広告するより、「NASだけ」「管理画面だけ」のように必要な範囲へ絞るほうが安全です。</p>

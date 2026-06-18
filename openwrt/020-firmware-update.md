@@ -265,8 +265,8 @@ ifstatus wan6 | grep -E '"ip6addr"|"ip6prefix"'
 
 ```sh
 opkg list-installed | grep -E 'wireguard|tailscale'
-wg show         # WireGuardの場合
-tailscale status # Tailscaleの場合
+command -v wg >/dev/null && wg show
+command -v tailscale >/dev/null && tailscale status
 logread | grep -Ei 'wireguard|tailscale|vpn' | tail -n 80
 ```
 

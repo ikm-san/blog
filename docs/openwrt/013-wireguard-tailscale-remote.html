@@ -72,7 +72,7 @@ ls -l &quot;$BACKUP_DIR&quot;</code></pre>
 <h3>Linksys公式VPNアシスタントモジュールのインストール</h3>
 <p>通常はLinksys公式サポートページ（https://support.linksys.com/kb/article/8723-jp/）からVPN Assistantモジュールをダウンロードし、LuCIからインストールします。</p>
 <p>上級者向けにWireGuard関連パッケージを個別導入する方法も公式ページにありますが、順番指定があるため、まずVPN Assistantを使うほうが安全です。</p>
-<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開く</li><li><strong>Update lists</strong> をクリックしてパッケージリストを更新し、完了後 <strong>Dismiss</strong> で閉じる</li><li><strong>Upload Package</strong> をクリックし、ダウンロードしたVPN Assistantの <code>.ipk</code> を選択して <strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li><code>installed in root is up to date.</code> と表示されたら <strong>Dismiss</strong></li><li>ルーターを再起動し、LuCIを開き直すと <strong>Services</strong> に <strong>VPN Assistant</strong> が追加される</li></ol>
+<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで **System** → **Software** を開く</li><li>**Update lists** をクリックしてパッケージリストを更新し、完了後 **Dismiss** で閉じる</li><li>**Upload Package** をクリックし、ダウンロードしたVPN Assistantの <code>.ipk</code> を選択して **Upload**</li><li>確認画面で **Install** をクリック</li><li><code>installed in root is up to date.</code> と表示されたら **Dismiss**</li><li>ルーターを再起動し、LuCIを開き直すと **Services** に **VPN Assistant** が追加される</li></ol>
 <p>最初はCLIで個別パッケージを組み合わせるより、公式モジュールで動く状態を先に作るほうが、トラブルを切り分けやすくなります。</p>
 <p>インストール後は、パッケージとメニュー追加の状態を確認します。</p>
 <pre><code class="language-sh">echo &quot;### VPN related packages&quot;
@@ -84,7 +84,7 @@ ls /etc/init.d | grep -Ei &#x27;wireguard|tailscale|vpn&#x27; || true
 echo &quot;### recent install/service logs&quot;
 logread | grep -Ei &#x27;vpn|wireguard|tailscale|opkg&#x27; | tail -n 80</code></pre>
 <h3>VPN AssistantでWireGuardを設定する</h3>
-<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>WireGuard Server</strong> タブを開く</li><li><strong>Enable WireGuard VPN</strong> を有効にする</li><li>必要な項目を入力し、<strong>Save &amp; Apply</strong> をクリック</li><li>設定反映後、安定運用のためルーターを一度再起動する</li><li><strong>Client Peers</strong> セクションの <strong>Show QR</strong> から、スマートフォン用QRコードまたはテキスト設定を取得する</li></ol>
+<ol><li>**Services** → **VPN Assistant** を開く</li><li>**WireGuard Server** タブを開く</li><li>**Enable WireGuard VPN** を有効にする</li><li>必要な項目を入力し、**Save &amp; Apply** をクリック</li><li>設定反映後、安定運用のためルーターを一度再起動する</li><li>**Client Peers** セクションの **Show QR** から、スマートフォン用QRコードまたはテキスト設定を取得する</li></ol>
 <p>QRコードを使うと、スマートフォン側設定をかなり簡単に取り込めます。</p>
 <p>最初はスマートフォン1台だけ接続し、正常動作を確認してからPCや他端末を追加するほうが安全です。</p>
 <p>公式手順ではVPN Assistantを使う流れが主です。</p>
@@ -110,7 +110,7 @@ uci commit firewall
 <h3>クライアント側の設定（Windows/Mac/iPhone）</h3>
 <p>WireGuard公式クライアントアプリを使います（iOS/Android/Windows/Mac対応）:</p>
 <p>最初はスマートフォン側から試すほうが、外出先接続を確認しやすくなります。</p>
-<ol><li>WireGuardアプリをインストール</li><li><strong>Add Tunnel</strong> → <strong>Create from scratch</strong> または QRコードを使用</li><li>クライアント設定の例:</li></ol>
+<ol><li>WireGuardアプリをインストール</li><li>**Add Tunnel** → **Create from scratch** または QRコードを使用</li><li>クライアント設定の例:</li></ol>
 <pre><code class="language-ini">[Interface]
 PrivateKey = &lt;クライアントの秘密鍵&gt;
 Address = 10.0.0.2/24
@@ -125,7 +125,11 @@ PersistentKeepalive = 25</code></pre>
 <p>最初は <code>192.168.1.1/32</code> のように管理画面だけ許可し、必要に応じて範囲を広げる方法も安全です。</p>
 <h3>動作確認</h3>
 <pre><code class="language-sh">echo &quot;### WireGuard status&quot;
-wg show
+if command -v wg &gt;/dev/null; then
+  wg show
+else
+  echo &quot;wg command is not installed&quot;
+fi
 
 echo &quot;### WireGuard-related firewall and interfaces&quot;
 uci show firewall | grep -Ei &#x27;wireguard|51820|wg&#x27; || true
@@ -143,9 +147,9 @@ logread | grep -Ei &#x27;wireguard|wg|51820&#x27; | tail -n 80</code></pre>
 <p>特にIPoEやIPv4 over IPv6環境では、まずTailscaleから始めるほうが入りやすい場合があります。</p>
 <h3>Linksys公式VPNアシスタントモジュールのインストール</h3>
 <p>TailscaleもWireGuardと同じVPN Assistantモジュールから有効化します。Linksys公式サポートページ（https://support.linksys.com/kb/article/8723-jp/）からVPNアシスタントモジュールをダウンロードしてインストールします。</p>
-<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開き、<strong>Update lists</strong> を実行</li><li><strong>Upload Package</strong> からダウンロードしたファイルを選択して <strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li>完了後にルーターを再起動し、LuCIを開き直す（<strong>Services</strong> に <strong>VPN Assistant</strong> が追加される）</li></ol>
+<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで **System** → **Software** を開き、**Update lists** を実行</li><li>**Upload Package** からダウンロードしたファイルを選択して **Upload**</li><li>確認画面で **Install** をクリック</li><li>完了後にルーターを再起動し、LuCIを開き直す（**Services** に **VPN Assistant** が追加される）</li></ol>
 <h3>VPN AssistantでTailscaleを有効化する</h3>
-<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>Tailscale</strong> タブへ移動する</li><li><strong>Enable Tailscale Service</strong> を有効にする</li><li>必要に応じて <strong>Advertise as Exit Node</strong> を選ぶ</li><li>認証用URLが表示されたらブラウザで開き、Tailscaleアカウントで登録する</li><li>最後に <strong>OK</strong> をクリックし、ルーターの再起動を待つ</li></ol>
+<ol><li>**Services** → **VPN Assistant** を開く</li><li>**Tailscale** タブへ移動する</li><li>**Enable Tailscale Service** を有効にする</li><li>必要に応じて **Advertise as Exit Node** を選ぶ</li><li>認証用URLが表示されたらブラウザで開き、Tailscaleアカウントで登録する</li><li>最後に **OK** をクリックし、ルーターの再起動を待つ</li></ol>
 <p>Tailscaleは、複数端末をあとから追加しやすいところも扱いやすいポイントです。</p>
 <p>まずはスマートフォン1台だけ接続確認してから、必要な端末を増やしていくほうが整理しやすくなります。</p>
 <p>Tailscaleアカウントでログインすると、ルーターがTailscaleネットワーク（Tailnet）へ参加します。</p>
@@ -157,13 +161,20 @@ logread | grep -Ei &#x27;wireguard|wg|51820&#x27; | tail -n 80</code></pre>
 <p>CLIで追加設定する場合は、公式UIでの状態と衝突しないよう、変更前に現在のTailscale設定を確認してください。</p>
 <h3>Tailscaleでのアクセス確認</h3>
 <pre><code class="language-sh">echo &quot;### Tailscale status&quot;
-tailscale status
+if command -v tailscale &gt;/dev/null; then
+  if tailscale status; then
+    echo &quot;### Tailscale IP&quot;
+    tailscale ip
 
-echo &quot;### Tailscale IP&quot;
-tailscale ip
-
-echo &quot;### ping over Tailscale&quot;
-tailscale ping &lt;接続先のTailscaleノード名&gt;
+    echo &quot;### ping over Tailscale&quot;
+    TAILSCALE_NODE=&quot;example-node&quot;
+    tailscale ping &quot;$TAILSCALE_NODE&quot;
+  else
+    echo &quot;tailscaled is not running or not authenticated yet&quot;
+  fi
+else
+  echo &quot;tailscale command is not installed&quot;
+fi
 
 echo &quot;### Tailscale logs&quot;
 logread | grep -Ei &#x27;tailscale|tailscaled&#x27; | tail -n 80</code></pre>
@@ -171,11 +182,15 @@ logread | grep -Ei &#x27;tailscale|tailscaled&#x27; | tail -n 80</code></pre>
 <p>CLIは、最初は設定変更より「どの端末が見えているか」を確認する用途で使うくらいで十分です。</p>
 <h3>起動を自動化する</h3>
 <pre><code class="language-sh">echo &quot;### enable and start tailscale&quot;
-/etc/init.d/tailscale enable
-/etc/init.d/tailscale start
+if [ -x /etc/init.d/tailscale ]; then
+  /etc/init.d/tailscale enable
+  /etc/init.d/tailscale start
 
-echo &quot;### verify tailscale service&quot;
-/etc/init.d/tailscale status</code></pre>
+  echo &quot;### verify tailscale service&quot;
+  /etc/init.d/tailscale status
+else
+  echo &quot;tailscale service is not installed&quot;
+fi</code></pre>
 <h2>アクセス範囲の設計</h2>
 <table><thead><tr><th>用途</th><th>推奨設定</th></tr></thead><tbody><tr><td>自宅NASだけ</td><td>WireGuard AllowedIPs を NASのIPのみに絞る</td></tr><tr><td>管理画面だけ</td><td>AllowedIPs を <code>192.168.1.1/32</code></td></tr><tr><td>LAN全体</td><td><code>192.168.1.0/24</code></td></tr><tr><td>複数ネットワーク</td><td>VLANの各セグメントをAllowedIPsに追加</td></tr></tbody></table>
 <p>VPNは「LAN全体へ全部入れる」より、「必要な機器へだけ入れる」ほうが安全です。</p>
@@ -210,10 +225,10 @@ ls -l &quot;$BACKUP_DIR&quot;</code></pre>
 <ol><li>Tailscale管理コンソールでルートの承認を確認</li><li><code>tailscale status</code> でルーターがネットワークに参加しているか確認</li></ol>
 <p>Tailnetへ参加できていても、「ルート承認」が完了していないとLANへ届かないことがあります。</p>
 <h3>VPN接続は成功するがLANにpingが届かない</h3>
-<ul><li><strong>WireGuardの場合:</strong> AllowedIPsにLANの範囲が含まれているか確認</li><li><strong>Tailscaleの場合:</strong> <code>--advertise-routes</code> の設定と管理コンソールの承認状態を確認</li></ul>
+<ul><li>**WireGuardの場合:** AllowedIPsにLANの範囲が含まれているか確認</li><li>**Tailscaleの場合:** <code>--advertise-routes</code> の設定と管理コンソールの承認状態を確認</li></ul>
 <h2>まとめ</h2>
 <p>VPN設定は、次の順番で進めると整理しやすいです:</p>
-<ol><li>回線条件（固定IP・ポート開放可否）を確認してWireGuard / Tailscaleを選ぶ</li><li>Linksys公式サポート（https://support.linksys.com/kb/article/8723-jp/）の手順でパッケージをインストール</li><li>WireGuardは <strong>Services</strong> → <strong>VPN Assistant</strong> → <strong>WireGuard Server</strong> で設定し、Client PeersのQRコードを使う</li><li>Tailscaleは <strong>Services</strong> → <strong>VPN Assistant</strong> → <strong>Tailscale</strong> で有効化し、認証URLから登録する</li><li>接続後は <code>wg show</code> / <code>tailscale status</code> で状態を確認する</li></ol>
+<ol><li>回線条件（固定IP・ポート開放可否）を確認してWireGuard / Tailscaleを選ぶ</li><li>Linksys公式サポート（https://support.linksys.com/kb/article/8723-jp/）の手順でパッケージをインストール</li><li>WireGuardは **Services** → **VPN Assistant** → **WireGuard Server** で設定し、Client PeersのQRコードを使う</li><li>Tailscaleは **Services** → **VPN Assistant** → **Tailscale** で有効化し、認証URLから登録する</li><li>接続後は <code>wg show</code> / <code>tailscale status</code> で状態を確認する</li></ol>
 <p>固定IPやポート開放を管理できるならWireGuard、回線条件をあまり気にせず始めたいならTailscale、という考え方が分かりやすいです。</p>
 <p>最初からLAN全体をVPNへ公開するより、「NASだけ」「管理画面だけ」のように必要な範囲へ絞るほうが安全です。</p>
 <p>公式VPN Assistantモジュールを使って、まずは動く状態を作ってから理解を深めていくほうが、家庭や小さなオフィスでは進めやすくなります。</p>

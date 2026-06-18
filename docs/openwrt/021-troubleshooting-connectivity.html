@@ -72,22 +72,22 @@ logread | tail -n 120</code></pre>
 <p>実際には、「設定問題」より「ケーブル」「ONU/HGW」「再起動中」だった、というケースもかなり多くあります。</p>
 <h2>ステップ1: 物理・LED状態の確認</h2>
 <pre><code>電源 → LED → ケーブル → ONU/HGW</code></pre>
-<ul><li><strong>電源</strong>: LN6001-JPの電源LEDが点灯しているか</li><li><strong>LED状態</strong>: 上部LED白点灯=オンライン、赤点灯=インターネット接続なし、青点滅=起動中</li><li><strong>WANケーブル</strong>: ONU/HGWとLN6001-JPのWANポート間のケーブルが抜けていないか</li><li><strong>ONU/HGWの状態</strong>: ONU/HGWの電源・LED状態も確認（LN6001-JPではなくONU/HGW側の問題の可能性）</li></ul>
+<ul><li>**電源**: LN6001-JPの電源LEDが点灯しているか</li><li>**LED状態**: 上部LED白点灯=オンライン、赤点灯=インターネット接続なし、青点滅=起動中</li><li>**WANケーブル**: ONU/HGWとLN6001-JPのWANポート間のケーブルが抜けていないか</li><li>**ONU/HGWの状態**: ONU/HGWの電源・LED状態も確認（LN6001-JPではなくONU/HGW側の問題の可能性）</li></ul>
 <p>最初は、ルーターだけでなくONU/HGW側LEDも確認するほうが切り分けしやすくなります。</p>
 <h2>ステップ2: 有線でLuCIにアクセスできるか確認</h2>
 <p>PCとLN6001-JPのLANポートを有線接続して <code>https://192.168.1.1</code> にアクセスします。</p>
 <p>Wi‑Fi設定変更直後は、有線で確認したほうがかなり安全です。</p>
-<ul><li><strong>アクセスできる</strong>: LN6001-JPは動作中。Wi-Fi設定やWAN接続の問題を確認</li><li><strong>アクセスできない</strong>: LAN側IPアドレスの変更、PCのIP設定、PCのブラウザキャッシュを確認</li></ul>
-<pre><code class="language-sh"># PCから確認（Windowsの場合）
-ipconfig
-# PCから確認（MacまたはLinuxの場合）
+<ul><li>**アクセスできる**: LN6001-JPは動作中。Wi-Fi設定やWAN接続の問題を確認</li><li>**アクセスできない**: LAN側IPアドレスの変更、PCのIP設定、PCのブラウザキャッシュを確認</li></ul>
+<pre><code class="language-powershell"># PCから確認（Windowsの場合）
+ipconfig</code></pre>
+<pre><code class="language-sh"># PCから確認（MacまたはLinuxの場合）
 ip addr show</code></pre>
 <p>最初は「PC側が正しいIPを取れているか」を見るだけでもかなり意味があります。</p>
 <p>LN6001-JPのLAN IPを変更している場合は、変更後IPアドレスでアクセスします。</p>
 <p>有線でLuCIへ入れるなら、LAN側はかなり正常に近い状態です。</p>
 <p>次は「WAN側へ出られているか」を確認します。</p>
 <h2>ステップ3: WANの接続状態を確認</h2>
-<p>LuCI: <strong>Status</strong> → <strong>Overview</strong> でWAN/WAN6のIPアドレスが表示されているか確認。</p>
+<p>LuCI: **Status** → **Overview** でWAN/WAN6のIPアドレスが表示されているか確認。</p>
 <pre><code class="language-sh"># WAN（IPv4）の状態確認
 ifstatus wan
 
@@ -99,7 +99,7 @@ ifstatus wan | grep -E &#x27;&quot;up&quot;|&quot;ipaddr&quot;&#x27;
 ifstatus wan6 | grep -E &#x27;&quot;up&quot;|&quot;ip6addr&quot;&#x27;</code></pre>
 <p><code>ifstatus wan</code> と <code>ifstatus wan6</code> は、まず最初に確認したいコマンドです。</p>
 <p>IPoE環境では、「WANは正常だがWAN6だけ落ちている」ケースもあります。</p>
-<p><strong>WANがupでIPアドレスがない場合:</strong></p>
+<p>**WANがupでIPアドレスがない場合:**</p>
 <pre><code class="language-sh"># PPPoEの場合: 設定を確認
 uci show network.wan
 
@@ -128,7 +128,7 @@ cat /tmp/dhcp.leases
 # dnsmasqのログ（DHCP配布の状況）
 logread | grep -i dnsmasq | tail -n 30</code></pre>
 <p>端末側での確認:</p>
-<ul><li><strong>Windows</strong>: <code>ipconfig</code> で IPアドレスが <code>169.254.x.x</code> の場合はDHCP取得失敗</li><li><strong>Mac</strong>: システム設定 → ネットワーク → IPアドレスを確認</li><li><strong>スマートフォン</strong>: Wi-Fi設定 → 接続済みSSIDの詳細</li></ul>
+<ul><li>**Windows**: <code>ipconfig</code> で IPアドレスが <code>169.254.x.x</code> の場合はDHCP取得失敗</li><li>**Mac**: システム設定 → ネットワーク → IPアドレスを確認</li><li>**スマートフォン**: Wi-Fi設定 → 接続済みSSIDの詳細</li></ul>
 <p><code>cat /tmp/dhcp.leases</code> は、「その端末が本当にIP取得できているか」を確認する時にかなり便利です。</p>
 <p>DHCPで問題がある場合は、次を確認します:</p>
 <pre><code class="language-sh"># DHCPサーバーの設定を確認
@@ -207,7 +207,7 @@ command -v iptables &gt;/dev/null &amp;&amp; iptables -L -n -v | head -n 80</cod
 <h2>症状別クイック対処表</h2>
 <p>いったん次の3つが分かれば、切り分けはかなり進みます。</p>
 <ul><li>全端末に起きているのか、一部端末だけなのか</li><li>IPアドレスは取れているのか</li><li>IP直打ちでは通るのか、ドメイン名だけ失敗するのか</li></ul>
-<table><thead><tr><th>症状</th><th>確認コマンド</th><th>よくある原因・対処</th></tr></thead><tbody><tr><td>全端末でインターネット不可</td><td><code>ifstatus wan</code></td><td>WANがdown→ONU/HGW確認、IPoE設定確認</td></tr><tr><td>Wi-Fiに接続できない</td><td><code>wifi status</code></td><td>SSID/パスワード確認、SSIDが無効になっていないか確認</td></tr><tr><td>IPが取れない（169.254.x.x）</td><td><code>cat /tmp/dhcp.leases</code></td><td>DHCPサーバー無効、VLAN設定ミス</td></tr><tr><td>ドメインで開けない</td><td><code>nslookup google.co.jp</code></td><td>DNS設定確認、adblock確認</td></tr><tr><td>一部サイトのみ表示されない</td><td><code>logread | grep adblock</code></td><td>adblockがブロック中→ホワイトリスト追加</td></tr><tr><td>設定変更後につながらない</td><td><code>logread | tail -n 50</code></td><td>バックアップから設定を復元</td></tr><tr><td>有線はOKだがWi-Fiが不安定</td><td><code>wifi status</code></td><td>チャンネル設定・端末の再接続を試みる</td></tr></tbody></table>
+<table><thead><tr><th>症状</th><th>確認コマンド</th><th>よくある原因・対処</th></tr></thead><tbody><tr><td>全端末でインターネット不可</td><td><code>ifstatus wan</code></td><td>WANがdown→ONU/HGW確認、IPoE設定確認</td></tr><tr><td>Wi-Fiに接続できない</td><td><code>wifi status</code></td><td>SSID/パスワード確認、SSIDが無効になっていないか確認</td></tr><tr><td>IPが取れない（169.254.x.x）</td><td><code>cat /tmp/dhcp.leases</code></td><td>DHCPサーバー無効、VLAN設定ミス</td></tr><tr><td>ドメインで開けない</td><td><code>nslookup google.co.jp</code></td><td>DNS設定確認、adblock確認</td></tr><tr><td>一部サイトのみ表示されない</td><td>`logread \</td><td>grep adblock`</td><td>adblockがブロック中→ホワイトリスト追加</td></tr><tr><td>設定変更後につながらない</td><td>`logread \</td><td>tail -n 50`</td><td>バックアップから設定を復元</td></tr><tr><td>有線はOKだがWi-Fiが不安定</td><td><code>wifi status</code></td><td>チャンネル設定・端末の再接続を試みる</td></tr></tbody></table>
 <p>LuCIだけでも、かなり多くの切り分けができます。</p>
 <p>最初は「Overview」「DHCP Leases」「System Log」を見るだけでも十分役立ちます。</p>
 <h2>LuCIの主要な状態確認画面</h2>

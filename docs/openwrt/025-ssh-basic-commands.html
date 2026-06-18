@@ -53,7 +53,7 @@ for cfg in network wireless firewall dhcp system; do
 done
 
 ls -l &quot;$BACKUP_DIR&quot;</code></pre>
-<p>このバックアップはルーター内に保存されます。大きな変更前は、LuCIの <strong>System</strong> → <strong>Backup / Flash Firmware</strong> からPCにもバックアップを保存しておくほうが安全です。</p>
+<p>このバックアップはルーター内に保存されます。大きな変更前は、LuCIの **System** → **Backup / Flash Firmware** からPCにもバックアップを保存しておくほうが安全です。</p>
 <h3>変更する時のUCIテンプレート</h3>
 <p>実際に設定を変更する時は、次の型を崩さないようにします。</p>
 <pre><code class="language-sh"># 1. まず対象設定を読む
@@ -90,9 +90,9 @@ wifi reload</code></pre>
 <p><code>network restart</code> や <code>wifi reload</code> は接続が切れることがあります。有線LAN接続と、必要なら本体リセットできる状態を用意してから実行します。</p>
 <figure><img src="/blog/openwrt/assets/025/diagram-02.png" alt="考え方はシンプル"></figure>
 <h2>SSHログイン方法</h2>
-<p><strong>Mac/Linux（ターミナル）:</strong></p>
+<p>**Mac/Linux（ターミナル）:**</p>
 <pre><code class="language-sh">ssh root@192.168.1.1</code></pre>
-<p><strong>Windows（PowerShellまたはコマンドプロンプト）:</strong></p>
+<p>**Windows（PowerShellまたはコマンドプロンプト）:**</p>
 <pre><code class="language-powershell">ssh root@192.168.1.1</code></pre>
 <p>初回接続時は fingerprint の確認メッセージが出るので <code>yes</code> と入力します。</p>
 <p>パスワードはLuCIのadmin（root）パスワードと同じです。</p>
@@ -149,7 +149,8 @@ wifi status
 # 接続中の無線端末一覧
 # 実際のwlan名は環境ごとに変わるため、先に iw dev で確認
 iw dev
-iw dev &lt;wlan名&gt; station dump
+WLAN_IF=&quot;ath00&quot;  # iw devで表示されたInterface名に置き換える
+iw dev &quot;$WLAN_IF&quot; station dump
 
 # ARPテーブル（LANに接続している端末のMACアドレス）
 cat /proc/net/arp
@@ -215,10 +216,10 @@ cp /etc/config/wireless /etc/config/wireless.backup.$(date +%Y%m%d)
 # LAN IPのような基本項目を変更する場合は、LuCIでの操作を優先
 # CLIで変更する場合も、実機のセクション名を uci show で確認してから行う</code></pre>
 <p>最初は「network」「wireless」「firewall」「dhcp」の4つだけ読めればかなり役立ちます。</p>
-<blockquote><p><strong>注意</strong>: <code>uci set</code> / <code>uci commit</code> は設定を実際に変更します。</p></blockquote>
-<p>&gt;</p>
+<blockquote><p>**注意**: <code>uci set</code> / <code>uci commit</code> は設定を実際に変更します。</p></blockquote>
+<blockquote><p></p></blockquote>
 <blockquote><p>Wi‑Fi名やLAN IPは環境ごとにセクション名が異なるため、この記事では読み取り中心にしています。</p></blockquote>
-<p>&gt;</p>
+<blockquote><p></p></blockquote>
 <blockquote><p>最初はLuCI側で変更し、SSHでは状態確認中心にするほうが安全です。</p></blockquote>
 <p>---</p>
 <h2>サービス管理コマンド</h2>
@@ -228,17 +229,17 @@ cp /etc/config/wireless /etc/config/wireless.backup.$(date +%Y%m%d)
 /etc/init.d/firewall restart
 /etc/init.d/dnsmasq restart    # DNS/DHCPサーバー
 /etc/init.d/uhttpd restart     # LuCI (Webサーバー)
-/etc/init.d/adblock restart    # adblock
+[ -x /etc/init.d/adblock ] &amp;&amp; /etc/init.d/adblock restart
 # TailscaleはLinksys公式モジュール導入後に存在する場合のみ
-/etc/init.d/tailscale restart
+[ -x /etc/init.d/tailscale ] &amp;&amp; /etc/init.d/tailscale restart
 
 # サービスの起動・停止
-/etc/init.d/adblock start
-/etc/init.d/adblock stop
+[ -x /etc/init.d/adblock ] &amp;&amp; /etc/init.d/adblock start
+[ -x /etc/init.d/adblock ] &amp;&amp; /etc/init.d/adblock stop
 
 # 起動時の自動起動を有効化・無効化
-/etc/init.d/adblock enable
-/etc/init.d/adblock disable
+[ -x /etc/init.d/adblock ] &amp;&amp; /etc/init.d/adblock enable
+[ -x /etc/init.d/adblock ] &amp;&amp; /etc/init.d/adblock disable
 
 # Wi-Fiの再読み込み
 wifi reload
@@ -330,7 +331,7 @@ vi /etc/config/network</code></pre>
 <p>最初は <code>cat</code> で読むだけでもかなり役立ちます。</p>
 <p><code>vi</code> 編集は、慣れてから少しずつ触るくらいでも十分です。</p>
 <blockquote><p>viの基本操作: <code>i</code> で挿入モード、<code>ESC</code> でコマンドモード、<code>:wq</code> で保存・終了、<code>:q!</code> で保存せず終了</p></blockquote>
-<p>&gt;</p>
+<blockquote><p></p></blockquote>
 <blockquote><p>最初は「保存せず閉じる（:q!）」を覚えておくだけでも安心感がかなり変わります。</p></blockquote>
 <p>---</p>
 <h2>よく使うコマンドの組み合わせ</h2>

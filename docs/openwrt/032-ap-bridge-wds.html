@@ -53,7 +53,7 @@ wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot; 2&gt;/dev/null || true
 
 echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
 <h2>Setup Assistantの導入手順</h2>
-<ol><li>Linksys公式サポートページ（https://support.linksys.com/kb/article/7195-jp/）から <code>setup-assistant.ipk</code> をダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開く</li><li><strong>Update lists</strong> をクリックしてパッケージリストを更新</li><li>完了後、<strong>Dismiss</strong> で閉じる</li><li><strong>Upload Package</strong> をクリック</li><li>ダウンロードした <code>setup-assistant.ipk</code> を <strong>Browse</strong> で選び、<strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li><code>installed in root is up to date.</code> と表示されたら <strong>Dismiss</strong> をクリック</li><li>ブラウザをリロードするか開き直し、<strong>Services</strong> → <strong>Setup Assistant</strong> が表示されることを確認</li></ol>
+<ol><li>Linksys公式サポートページ（https://support.linksys.com/kb/article/7195-jp/）から <code>setup-assistant.ipk</code> をダウンロード</li><li>LuCIで **System** → **Software** を開く</li><li>**Update lists** をクリックしてパッケージリストを更新</li><li>完了後、**Dismiss** で閉じる</li><li>**Upload Package** をクリック</li><li>ダウンロードした <code>setup-assistant.ipk</code> を **Browse** で選び、**Upload**</li><li>確認画面で **Install** をクリック</li><li><code>installed in root is up to date.</code> と表示されたら **Dismiss** をクリック</li><li>ブラウザをリロードするか開き直し、**Services** → **Setup Assistant** が表示されることを確認</li></ol>
 <p>最初は、「Services → Setup Assistant」が見えるかを確認できれば十分です。</p>
 <p>SSHから確認する場合は、次を見ます。</p>
 <pre><code class="language-sh">opkg list-installed | grep -Ei &#x27;setup|assistant&#x27;
@@ -63,14 +63,15 @@ logread | grep -Ei &#x27;setup|assistant|opkg&#x27; | tail -n 80</code></pre>
 <h2>AP Bridgeの設定手順</h2>
 <p>AP Bridgeでは、親ルーター配下でLN6001-JPをアクセスポイントとして使います。</p>
 <p>公式Setup Assistantでは、必要項目を入力してまとめて反映します。</p>
-<ol><li><strong>Services</strong> → <strong>Setup Assistant</strong> を開く</li><li><strong>AP Bridge</strong> タブを選ぶ</li><li>以下の項目を入力する</li></ol>
+<ol><li>**Services** → **Setup Assistant** を開く</li><li>**AP Bridge** タブを選ぶ</li><li>以下の項目を入力する</li></ol>
 <table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>SSID</td><td>アクセスポイントとして出したいSSID</td></tr><tr><td>SSID Password</td><td>そのSSIDのパスワード</td></tr><tr><td>Gateway IP</td><td>親ルーターまたはホームゲートウェイのIPアドレス</td></tr><tr><td>Access Point IP</td><td>LN6001-JPに割り当てる同一サブネット内のIPアドレス</td></tr></tbody></table>
-<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li>念のためLN6001-JPを再起動</li><li>変更後は <strong>Access Point IP</strong> に指定したIPアドレスでLuCIへアクセス</li></ol>
+<ol><li>**Save &amp; Apply** をクリック</li><li>念のためLN6001-JPを再起動</li><li>変更後は **Access Point IP** に指定したIPアドレスでLuCIへアクセス</li></ol>
 <p>最初は、「新しいIPアドレスでLuCIへ入り直せるか」を確認できればかなり十分です。</p>
-<p>設定後は、旧IPではなく新しく指定した <strong>Access Point IP</strong> に接続します。</p>
+<p>設定後は、旧IPではなく新しく指定した **Access Point IP** に接続します。</p>
 <pre><code class="language-sh"># PC側から確認
-ping &lt;Access Point IP&gt;
-ssh root@&lt;Access Point IP&gt;
+AP_IP=&quot;192.168.1.2&quot;
+ping &quot;$AP_IP&quot;
+ssh root@&quot;$AP_IP&quot;
 
 # ルーター側へ入れたら状態確認
 uci show network.lan
@@ -82,22 +83,23 @@ logread | tail -n 80</code></pre>
 <h2>WDS子機モードの設定手順</h2>
 <p>WDSは、有線バックホールではなく、親SSIDへ無線接続して子機側を構成する方式です。</p>
 <p>Linksys公式ページでは、WDS子機として使う場合もSetup Assistantで設定します。</p>
-<ol><li><strong>Services</strong> → <strong>Setup Assistant</strong> を開く</li><li><strong>WDS Configuration</strong> タブを選ぶ</li><li>以下の項目を入力する</li></ol>
+<ol><li>**Services** → **Setup Assistant** を開く</li><li>**WDS Configuration** タブを選ぶ</li><li>以下の項目を入力する</li></ol>
 <table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>Parent SSID</td><td>親ルーターのSSID</td></tr><tr><td>Parent SSID Password</td><td>親SSIDのパスワード</td></tr><tr><td>Parent IP Address</td><td>親ルーターのIPアドレス</td></tr><tr><td>Child IP Address</td><td>LN6001-JP子機に割り当てる同一サブネット内のIPアドレス</td></tr></tbody></table>
-<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li>念のためLN6001-JPを再起動</li><li>子機側のIPアドレスでLuCIへアクセスできるか確認</li></ol>
+<ol><li>**Save &amp; Apply** をクリック</li><li>念のためLN6001-JPを再起動</li><li>子機側のIPアドレスでLuCIへアクセスできるか確認</li></ol>
 <p>最初は、「子機側IPアドレスへ入れるか」を確認するだけでもかなり役立ちます。</p>
 <p>WDS後の確認では、親SSIDへ接続できているか、子機側SSIDへ端末が接続できるかを分けます。</p>
 <pre><code class="language-sh"># 無線インターフェースと接続状態を確認
 wifi status
 iw dev
-iw dev &lt;wlan名&gt; link 2&gt;/dev/null || true
+WLAN_IF=&quot;ath00&quot;  # iw devで表示されたInterface名に置き換える
+iw dev &quot;$WLAN_IF&quot; link 2&gt;/dev/null || true
 
 # WDS/無線関連ログ
 logread | grep -Ei &#x27;wds|wifi|hostapd|wpa&#x27; | tail -n 100</code></pre>
 <p>---</p>
 <p>設定直後は、「壊れた」のではなく、「IPアドレスやWi‑Fi状態が変わっただけ」のケースもかなり多くあります。</p>
-<p>公式ページでは、うまくいかない場合に <strong>Network</strong> → <strong>Wireless</strong> を開き、Wi‑Fi関連インターフェース表示を確認して初期調整する手順が案内されています。</p>
-<p>初回表示で確認画面が出た場合は <strong>Continue</strong> をクリックし、Wi‑Fiサービス再起動後に画面が正しく表示されることを確認します。</p>
+<p>公式ページでは、うまくいかない場合に **Network** → **Wireless** を開き、Wi‑Fi関連インターフェース表示を確認して初期調整する手順が案内されています。</p>
+<p>初回表示で確認画面が出た場合は **Continue** をクリックし、Wi‑Fiサービス再起動後に画面が正しく表示されることを確認します。</p>
 <p>最初は、「新しいIPアドレスで入れているか」を確認するだけでもかなり切り分けしやすくなります。</p>
 <p>どうしても戻れない場合でも、SSHへ入れるなら直前のバックアップから戻せます。</p>
 <pre><code class="language-sh"># 変更前バックアップから戻す例
