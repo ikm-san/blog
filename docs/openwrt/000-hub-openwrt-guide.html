@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/ndf7569fea475">LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】</a></p></blockquote>
+<h1>LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>このページについて</h2>
+<p>OpenWrtベースのWi-Fiルーターは、できることが多いぶん、最初にどこから触ればいいのか少し分かりにくいところがあります。</p>
+<p>このページは、Linksys Velop WRT Pro 7（LN6001-JP）を使って、家庭・小さなオフィス・店舗のネットワークを整えていくための連載インデックスです。単なる目次というより、「まず何を読めばいいか」「自分の使い方に合いそうか」「どこまでできるのか」をざっくりつかむための入口として用意しています。</p>
+<p>LN6001-JPは、Wi-Fi 7世代のハードウェアに、OpenWrtベースならではの柔軟さを組み合わせた国内向け製品です。一般的な市販ルーターよりも少し踏み込んだ設定ができる一方で、工場出荷時点で初期設定を済ませてあるので、最初から全部をCLIで触るような製品でもありません。</p>
+<p>この連載では、買う前に見ておきたいポイントから、初期設定、LuCI、Wi-Fi、VLAN、VPN、広告ブロック、トラブル対応まで、知りたい順に追いやすい形でまとめています。</p>
+<p>対象はOpenWrtの上級者だけではありません。Wi-Fi 7ルーターを探している人、IPoE回線で悩んでいる人、ゲストWi-FiやVPNを整理したい家庭や小さなオフィスの人にも向いています。</p>
+<p>一般的な市販ルーターでは少し物足りない。でも、いきなり全部を自分で作り込むほどではない。そんな人にとって、LN6001-JPはかなりちょうどいい立ち位置のルーターだと思います。YAMAHAやNECの業務用ルーターを自宅で使ってサーバーラックも構築してしまうような逸般の誤家庭の方でもWi-Fiは必要ですので、カスタムできるWiFi APとして遊んでほしいです。</p>
+<figure><img src="/blog/openwrt/assets/000/diagram-01.png" alt="よくある悩み"></figure>
+<h2>このページでわかること</h2>
+<ul><li>LN6001-JPの連載を、どの順番で読むと迷いにくいか</li><li>家庭、小さなオフィス、店舗それぞれで最初に読むべき記事</li><li>IPoE、Wi-Fi、VLAN、VPNなど、目的別にどの記事を見ればよいか</li></ul>
+<h2>最初に知っておくと楽な用語</h2>
+<p>この連載では専門用語も出てきますが、各記事の中でも必要なところで短く補足します。最初は次の理解で十分です。</p>
+<ul><li>LuCI: ブラウザで開くOpenWrt系の管理画面です。</li><li>SSH / CLI: 文字で状態を確認する操作方法です。最初は読み取り中心で使います。</li><li>LAN: 家や事務所の内側ネットワークです。</li><li>WAN: インターネット回線側のネットワークです。</li><li>SSID: スマートフォンやPCに表示されるWi-Fi名です。</li><li>DHCP: ルーターが端末へIPアドレスを自動で配る仕組みです。</li><li>DNS: <code>example.com</code> のような名前を通信先の住所へ変換する仕組みです。</li><li>VLAN: 1つの機器上で Staff、Guest、Camera のようにネットワークを部屋分けする仕組みです。</li><li>firewall zone: その部屋同士が通信してよいかを決める境界線です。</li><li>IPoE: 日本の光回線でよく使われるIPv6系の接続方式です。</li><li>PPPoE: プロバイダのIDとパスワードで接続する方式です。</li><li>VPN: 外出先から自宅や事務所へ安全に入るための通路です。</li></ul>
+<figure><img src="/blog/openwrt/assets/000/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まず読むならこの5本</h2>
+<ol><li><a href="https://note.com/ikmsan/n/n1e25c8075cc2">LN6001-JPとは何か: OpenWrtベースWi-Fi 7ルーターの立ち位置</a></li><li><a href="https://note.com/ikmsan/n/n9fcf33e2b050">日本でOpenWrt系Wi-Fiルーターを使う時に技適をどう考えるか</a></li><li><a href="https://note.com/ikmsan/n/n97ddc6c12ca8">NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか</a></li><li><a href="https://note.com/ikmsan/n/n50a565a008a0">LN6001-JP初期設定チェックリスト</a></li><li><a href="https://note.com/ikmsan/n/nf5e2df270ea3">LN6001-JPのハードウェアを見る</a></li></ol>
+<p>この5本を読めば、LN6001-JPがどんな製品か、自分の回線や使い方に合いそうかを判断しやすくなります。細かい設定に入る前の地図として、最初にざっと見ておくと楽です。</p>
+<h2>用途別の読み方</h2>
+<h3>家庭で使いたい人</h3>
+<ul><li>003 まず製品の立ち位置をつかむ</li><li>004 初期設定の流れに目を通す</li><li>006 Wi-Fi帯域の使い分けを押さえる</li><li>007 Guest Wi-Fiの作り方を見る</li><li>010 家族・IoT・来客の分け方を考える</li></ul>
+<h3>小さなオフィスで使いたい人</h3>
+<ul><li>003 製品の立ち位置を先に読む</li><li>014 IPoEと回線方式を整理する</li><li>011 VLANの考え方を押さえる</li><li>012 DHCP予約の設計を見ておく</li><li>013 WireGuard/Tailscaleの使いどころを比べる</li></ul>
+<h3>店舗で使いたい人</h3>
+<ul><li>029 店舗構成の全体像を見る</li><li>007 ゲストWi-Fiの作り方を読む</li><li>011 Staff/Guest/Camera分離の考え方を押さえる</li><li>017 ポート開放よりVPNを検討</li><li>028 VPN構成の例を参考にする</li></ul>
+<h3>OpenWrtが気になる人</h3>
+<ul><li>001 OpenWrtの考え方から入る</li><li>002 日本国内でのWi-Fi機器の前提を押さえる</li><li>005 LuCIとSSHの入口を眺める</li><li>024 パッケージ追加の考え方を知る</li><li>025 読み取りCLIで何が見えるかをつかむ</li></ul>
+<h2>構成例記事の選び方</h2>
+<p>家庭、小規模オフィス、店舗のどれに近いか迷うなら、まずは次の3本から一番近いものを選ぶと入りやすいです。ネットワーク設計は、最初に「誰の端末を分けたいのか」を決めると考えやすくなります。</p>
+<ul><li><a href="https://note.com/ikmsan/n/n73a7fed30751">家庭向け構成例</a>: 家族用、来客用、IoT用のWi-Fiを分けたい家庭向けです。Main、Kids、IoT、Guest をどう分けるかを最初に押さえられます。</li><li><a href="https://note.com/ikmsan/n/nb0b4b7e63309">VPN向け構成例</a>: 外出先から自宅や小規模拠点へ安全に入りたい人向けです。WireGuard と Tailscale をどう選ぶかが入口になります。</li><li><a href="https://note.com/ikmsan/n/n506a774c0680">店舗向け構成例</a>: Staff、Guest、POS、カメラを整理したい店舗向けです。Staff、Guest、Device をどう分けるかを先に確認できます。</li></ul>
+<p>家庭で「まずWi-Fiを整理したい」なら 027、リモートアクセスを先に考えたいなら 028、店舗で業務端末と来客用を分けたいなら 029 から入ると、必要な関連記事にもつながりやすくなります。</p>
+<h2>記事一覧</h2>
+<h3>入門・導入</h3>
+<ul><li><a href="https://note.com/ikmsan/n/n8d8823719244">OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか</a></li><li><a href="https://note.com/ikmsan/n/n9fcf33e2b050">日本でOpenWrt系Wi-Fiルーターを使う時に技適をどう考えるか</a></li><li><a href="https://note.com/ikmsan/n/n1e25c8075cc2">LN6001-JPとは何か: OpenWrtベースWi-Fi 7ルーターの立ち位置</a></li><li><a href="https://note.com/ikmsan/n/n50a565a008a0">LN6001-JP初期設定チェックリスト</a></li><li><a href="https://note.com/ikmsan/n/n4c7478f4efe2">LuCIとSSHの基本</a></li></ul>
+<h3>家庭ネットワーク改善</h3>
+<ul><li><a href="https://note.com/ikmsan/n/ndd6f12876bc8">LN6001-JPのWi-Fi設定</a></li><li><a href="https://note.com/ikmsan/n/nacbd5d573d67">ゲストWi-Fiの作り方</a></li><li><a href="https://note.com/ikmsan/n/n4759cf81d0e1">DNS広告ブロック</a></li><li><a href="https://note.com/ikmsan/n/n284bb49cd1e3">家族向けフィルタリング</a></li></ul>
+<h3>小さなオフィス</h3>
+<ul><li><a href="https://note.com/ikmsan/n/n516c42447850">VLANで社内・来客ネットワークを分ける</a></li><li><a href="https://note.com/ikmsan/n/ndd5ae853f033">固定IPとDHCP予約</a></li><li><a href="https://note.com/ikmsan/n/n1a83908a226c">WireGuard/Tailscaleでリモート接続</a></li><li><a href="https://note.com/ikmsan/n/n97ddc6c12ca8">NTT IPoEとIPv4 over IPv6</a></li><li><a href="https://note.com/ikmsan/n/n8571cacdde40">監視とログ</a></li></ul>
+<h3>セキュリティ</h3>
+<ul><li><a href="https://note.com/ikmsan/n/nfe0609ff7bd4">firewall zonesの考え方</a></li><li><a href="https://note.com/ikmsan/n/n765ffea6ea82">ポート開放の注意点</a></li><li><a href="https://note.com/ikmsan/n/n8d21425036a9">Tailscaleの使いどころ</a></li><li><a href="https://note.com/ikmsan/n/n61235a13b478">IPv6の落とし穴</a></li><li><a href="https://note.com/ikmsan/n/nff6b598da354">ファームウェア更新運用</a></li></ul>
+<h3>トラブル対応</h3>
+<ul><li><a href="https://note.com/ikmsan/n/n1ab2d47c6d10">つながらない時の切り分け</a></li><li><a href="https://note.com/ikmsan/n/n5088d68a2205">リセットと復旧</a></li><li><a href="https://note.com/ikmsan/n/n3c25190a8e94">設定バックアップと復元</a></li><li><a href="https://note.com/ikmsan/n/n2bc5e8447e77">パッケージ追加で壊さないための考え方</a></li><li><a href="https://note.com/ikmsan/n/n99897dd3cae6">SSHで見る基本情報</a></li><li><a href="https://note.com/ikmsan/n/na751d7336b87">Windows/MacのSSHログイン方法</a></li></ul>
+<h3>製品・構成例</h3>
+<ul><li><a href="https://note.com/ikmsan/n/nf5e2df270ea3">LN6001-JPのハードウェアを見る</a></li><li><a href="https://note.com/ikmsan/n/n73a7fed30751">家庭向け構成例</a></li><li><a href="https://note.com/ikmsan/n/nb0b4b7e63309">VPN向け構成例</a></li><li><a href="https://note.com/ikmsan/n/n506a774c0680">店舗向け構成例</a></li><li><a href="https://note.com/ikmsan/n/n3ae0dd924a6d">LN6001-JP導入レビュー</a></li></ul>
+<h3>追加トピック</h3>
+<ul><li><a href="https://note.com/ikmsan/n/n00750e23f49c">MLOを有効化する前に確認すること</a></li><li><a href="https://note.com/ikmsan/n/n40b623436544">AP/ブリッジ/WDS子機として使う</a></li><li><a href="https://note.com/ikmsan/n/na751d7336b87">Windows/MacのSSHログイン方法</a></li></ul>
+<h2>読む順番の決め方</h2>
+<p>この連載は、上から全部を順番に読む前提ではありません。むしろ、自分の困りごとに近い記事と、その前後だけ拾っていくほうが入りやすいです。</p>
+<p>たとえば「回線設定が不安」ならIPoEの記事から、「ゲストWi-Fiを分けたい」ならGuest Wi-Fiとfirewall zoneの記事から入ると、やりたいことと設定項目がつながりやすくなります。</p>
+<p>OpenWrtベースと聞くと、最初から難しいCLI操作が必要そうに見えるかもしれません。ですが、最初に見ておきたいのは、直感的に触れるLuCIの管理画面、回線方式、Wi-Fi名、バックアップの有無です。</p>
+<p>SSHやCLIも、いきなり設定を書き換えるためというより、まず今の状態を落ち着いて確かめるための道具として使えます。</p>
+<p>買う前に特に見ておきたいのは、次の3点です。</p>
+<ul><li>自分の回線方式がIPoE、PPPoE、IPv4 over IPv6、固定IPのどれか</li><li>家庭、店舗、小規模オフィスなど、どんな用途で使うのか</li><li>Guest Wi-Fi、VPN、VLAN、DNS設定など、追加で使いたい機能は何か</li></ul>
+<p>この3点が決まると、読む記事も設定の優先順位もかなり絞れます。LN6001-JPはできることが多い製品ですが、最初から全部を漏れなく使う必要はありません。</p>
+<p>まずは普通に使える状態を作って、必要な機能をあとから一つずつ足していくくらいがちょうどいいです。正直なところ、筆者自身も普段はオートIPoEモジュールでインターネット接続を済ませて、あとは工場出荷時の初期設定をベースに使うことが多いです。全部をいじり倒すより、安定して使えることのほうが大事な場面もかなりあります。</p>
+<h2>困りごとから探す</h2>
+<ul><li>回線まわりがよく分からない: <a href="https://note.com/ikmsan/n/n97ddc6c12ca8">NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか</a> から読むと、IPoE、IPv4 over IPv6、HGWまわりの整理がしやすいです。</li><li>買ってすぐ何を確認すべきか知りたい: <a href="https://note.com/ikmsan/n/n50a565a008a0">LN6001-JP初期設定チェックリスト</a> と <a href="https://note.com/ikmsan/n/nf5e2df270ea3">LN6001-JPのハードウェアを見る</a> を先に見ると、配線と初期設定で迷いにくくなります。</li><li>Wi-Fiを家族用、来客用、IoT用に分けたい: <a href="https://note.com/ikmsan/n/nacbd5d573d67">ゲストWi-Fiの作り方</a>、<a href="https://note.com/ikmsan/n/n284bb49cd1e3">家族向けフィルタリング</a>、<a href="https://note.com/ikmsan/n/n73a7fed30751">家庭向け構成例</a> が入口です。</li><li>小さなオフィスや店舗で分離したい: <a href="https://note.com/ikmsan/n/n516c42447850">VLANで社内・来客ネットワークを分ける</a>、<a href="https://note.com/ikmsan/n/n506a774c0680">店舗向け構成例</a>、<a href="https://note.com/ikmsan/n/nfe0609ff7bd4">firewall zonesの考え方</a> をまとめて見るとつながります。</li><li>外出先から自宅や店舗へ安全に入りたい: <a href="https://note.com/ikmsan/n/n1a83908a226c">WireGuard/Tailscaleでリモート接続</a>、<a href="https://note.com/ikmsan/n/n8d21425036a9">Tailscaleの使いどころ</a>、<a href="https://note.com/ikmsan/n/nb0b4b7e63309">VPN向け構成例</a> が近いです。</li><li>つながらない時の見方を知りたい: <a href="https://note.com/ikmsan/n/n1ab2d47c6d10">つながらない時の切り分け</a>、<a href="https://note.com/ikmsan/n/n8571cacdde40">監視とログ</a>、<a href="https://note.com/ikmsan/n/n99897dd3cae6">SSHで見る基本情報</a> を先に押さえると原因を絞りやすくなります。</li><li>SSHやCLIはどこから始めればいいか知りたい: <a href="https://note.com/ikmsan/n/n4c7478f4efe2">LuCIとSSHの基本</a>、<a href="https://note.com/ikmsan/n/n99897dd3cae6">SSHで見る基本情報</a>、<a href="https://note.com/ikmsan/n/na751d7336b87">Windows/MacのSSHログイン方法</a> から入ると無理がありません。</li></ul>
+<h2>設定前に毎回残すメモ</h2>
+<p>どの記事から始めるにしても、設定前に残しておきたいメモは共通です。回線方式、現在のLAN側IP、Wi-Fi名、管理画面URL、バックアップの有無を書いてから作業に入ると、途中で迷っても戻りやすくなります。</p>
+<p>特にIPoE、VLAN、VPN、firewallは、1つの変更が複数の場所に響きます。作業前に「いま何ができているか」をひとこと残しておくと、作業後に「何が変わったか」を比べやすくなります。</p>
+<p>中上級者の方が設定を深く触る場合は、<code>uci show</code> で設定内容を一気に出力して、テキストファイルとして保存しておくのもおすすめです。</p>
+<h2>よくある質問</h2>
+<h3>LN6001-JPの連載はどの記事から読めばいい？</h3>
+<p>まずは <a href="https://note.com/ikmsan/n/n1e25c8075cc2">LN6001-JPとは何か: OpenWrtベースWi-Fi 7ルーターの立ち位置</a>、<a href="https://note.com/ikmsan/n/n9fcf33e2b050">日本でOpenWrt系Wi-Fiルーターを使う時に技適をどう考えるか</a>、<a href="https://note.com/ikmsan/n/n97ddc6c12ca8">NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか</a>、<a href="https://note.com/ikmsan/n/n50a565a008a0">LN6001-JP初期設定チェックリスト</a>、<a href="https://note.com/ikmsan/n/nf5e2df270ea3">LN6001-JPのハードウェアを見る</a> の5本から入ると、製品の立ち位置、国内利用の前提、回線との相性、初期設定まで一通りつかみやすくなります。迷ったら、この5本だけ先に読めば大丈夫です。</p>
+<h3>OpenWrt初心者でもこの連載は読める？</h3>
+<p>はい、大丈夫です。最初からCLI中心で進める前提だと大変なので、Web管理画面のLuCI、回線方式、Wi-Fi、バックアップのような入りやすいテーマから順に追える構成にしています。</p>
+<p>SSHやCLIも出てきますが、最初は設定を書き換えるためというより、「今どうなっているか」を確認するための道具として使うくらいで十分です。</p>
+<h3>家庭向けと小さなオフィス向けでは読む記事は違う？</h3>
+<p>家庭なら <a href="https://note.com/ikmsan/n/ndd6f12876bc8">LN6001-JPのWi-Fi設定</a>、<a href="https://note.com/ikmsan/n/nacbd5d573d67">ゲストWi-Fiの作り方</a>、<a href="https://note.com/ikmsan/n/n284bb49cd1e3">家族向けフィルタリング</a> 寄り、小さなオフィスなら <a href="https://note.com/ikmsan/n/n97ddc6c12ca8">NTT IPoEとIPv4 over IPv6</a>、<a href="https://note.com/ikmsan/n/n516c42447850">VLANで社内・来客ネットワークを分ける</a>、<a href="https://note.com/ikmsan/n/ndd5ae853f033">固定IPとDHCP予約</a>、<a href="https://note.com/ikmsan/n/n1a83908a226c">WireGuard/Tailscaleでリモート接続</a> 寄りから読むと必要な情報へ早くたどり着けます。</p>
+<h2>この連載で扱わないこと</h2>
+<p>ここでは、一般的な家庭用Wi-Fiルーターに非公式ファームウェアをインストールする手順は扱いません。日本国内でWi-Fi機器を使う前提で、国内向けOpenWrtベースのOSを搭載したLN6001-JPをベースに進めます。</p>
+<p>また、技適や国内利用の前提に関わる無線設定を回避・変更するような内容も扱いません。</p>
+<h2>この連載の方針</h2>
+<p>この連載では、Linksys公式サポートで確認できる情報を優先します。無線の国設定・送信出力・DFSなど、国内使用の前提に関わる値は変更しません。</p>
+<p>IPoE、VPN、MLOなどは公式手順を確認しながら進め、設定変更の前後にはバックアップと復旧を重視します。OpenWrtらしい自由度は活かしつつ、家庭や小規模オフィスで現実的に安定して使うことを優先します。</p>
+<h2>CLI例の前提</h2>
+<p>この連載のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。技適に関わる無線の国設定、送信出力、DFS関連の値は変更しません。</p>
+<p>ファームウェア更新で画面名やコマンドの出力が変わることがあります。記事の内容と実際の画面が少し違う場合は、まずバックアップを取り、Linksys公式サポートの最新情報もあわせて確認してください。</p>
+<figure><img src="/blog/openwrt/assets/000/diagram-03.png" alt="まず見るところ"></figure>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>
