@@ -102,7 +102,7 @@ cat /tmp/dhcp.leases > "$BACKUP_DIR/dhcp-leases.txt" 2>/dev/null || true
 1. LuCI: **Network** → **Wireless** → `default_radio1`（5GHz）の **Edit** をクリック
 2. **Interface Configuration** タブ:
 
-![表 01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-01.png)
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-01.png)
 
 3. 6GHzラジオ（`default_radio2`）にも同じSSID・パスワードを設定すると、MLO対応端末が自動的に最適バンドを使用します（031の記事参照）
 
@@ -195,7 +195,7 @@ NAS、プリンター、スマートTVなどは固定割り当て（DHCP Static 
 1. **Network** → **DHCP and DNS** → **Static Leases** タブ
 2. **Add** をクリックして以下を入力:
 
-![表 02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-02.png)
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-02.png)
 
 最初は「NASとプリンターだけ固定する」くらいでもかなり役立ちます。
 
@@ -205,12 +205,18 @@ NAS、プリンター、スマートTVなどは固定割り当て（DHCP Static 
 
 ## ステップ6: 広告ブロック（adblock）を設定する
 
-設定詳細は 008 の記事を参照してください。
+設定詳細は 008 の記事を参照してください。自分でAdblock、ブロックリスト、LAN向けDNS配布、Force Local DNS、自動更新を組むのが難しい場合は、動作確認済みの導入スクリプトを使うのが一番早いです。
+
+```sh
+curl -sS -o /tmp/adb_setup.sh https://raw.githubusercontent.com/ikm-san/velop/main/adb_setup.sh && sh /tmp/adb_setup.sh -v
+```
+
+手動で進めたい場合は、まずパッケージ導入と状態確認だけ行います。
 
 ```sh
 opkg list-installed | grep -E 'adblock|luci-app-adblock' || true
 opkg update
-opkg install adblock luci-app-adblock
+opkg install adblock luci-app-adblock luci-i18n-adblock-ja
 /etc/init.d/adblock enable
 /etc/init.d/adblock start
 
@@ -218,7 +224,7 @@ opkg install adblock luci-app-adblock
 logread | grep -i adblock | tail -n 80
 ```
 
-LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・ホワイトリスト追加ができます。
+LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・ホワイトリスト追加ができます。導入スクリプトを使った場合も、あとからLuCIで許可リストやブロックリストを調整できます。
 
 最初は「普段よく見るサイトが問題なく開けるか」を確認できれば十分です。
 
@@ -232,7 +238,7 @@ LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・
 - Guestから家庭内NASや管理画面へ届かない
 - KidsやIoTを作った場合は、意図した制限だけ効いている
 
-![表 03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-03.png)
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-03.png)
 
 最初は、「GuestがLANへ届かない」「メインSSIDが安定している」の2つを確認できればかなり十分です。
 

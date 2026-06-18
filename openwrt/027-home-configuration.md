@@ -214,12 +214,18 @@ NAS、プリンター、スマートTVなどは固定割り当て（DHCP Static 
 
 ## ステップ6: 広告ブロック（adblock）を設定する
 
-設定詳細は 008 の記事を参照してください。
+設定詳細は 008 の記事を参照してください。自分でAdblock、ブロックリスト、LAN向けDNS配布、Force Local DNS、自動更新を組むのが難しい場合は、動作確認済みの導入スクリプトを使うのが一番早いです。
+
+```sh
+curl -sS -o /tmp/adb_setup.sh https://raw.githubusercontent.com/ikm-san/velop/main/adb_setup.sh && sh /tmp/adb_setup.sh -v
+```
+
+手動で進めたい場合は、まずパッケージ導入と状態確認だけ行います。
 
 ```sh
 opkg list-installed | grep -E 'adblock|luci-app-adblock' || true
 opkg update
-opkg install adblock luci-app-adblock
+opkg install adblock luci-app-adblock luci-i18n-adblock-ja
 /etc/init.d/adblock enable
 /etc/init.d/adblock start
 
@@ -227,7 +233,7 @@ opkg install adblock luci-app-adblock
 logread | grep -i adblock | tail -n 80
 ```
 
-LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・ホワイトリスト追加ができます。
+LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・ホワイトリスト追加ができます。導入スクリプトを使った場合も、あとからLuCIで許可リストやブロックリストを調整できます。
 
 最初は「普段よく見るサイトが問題なく開けるか」を確認できれば十分です。
 
