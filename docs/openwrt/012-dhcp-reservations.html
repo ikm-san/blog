@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/ndd5ae853f033">固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】</a></p></blockquote>
+<h1>固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>プリンター、NAS、防犯カメラ、業務端末は、毎回IPアドレスが変わると管理しにくくなります。</p>
+<p>ただし、端末側へ固定IPを手入力するより、ルーター側のDHCP予約（Static Lease）で管理したほうが、家庭や小さなオフィスでは運用しやすいことが多いです。</p>
+<p>LN6001-JPはOpenWrtベースなので、LuCIからDHCP予約をまとめて管理できます。</p>
+<p>最初から全部の端末へ固定IPを付ける必要はありません。まずは「IPが変わると困る機器」だけ整理していけば十分です。</p>
+<p>この記事では、DHCP予約の考え方、LuCIでの設定手順、IPアドレス体系の整理方法を、家庭・小規模オフィス向けに順番に整理します。</p>
+<figure><img src="/blog/openwrt/assets/012/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>DHCP予約が必要な機器と不要な機器の考え方</li><li>LN6001-JPで固定IPを整理する流れ</li><li>DHCP配布範囲と予約IPを安全に分ける方法</li><li>家庭・小規模オフィス向けのIPアドレス整理例</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>NAS、プリンター、カメラのIPが変わって困ったことがある</li><li>家庭や小さなオフィスで機器管理を整理したい</li><li>端末側の固定IPより、ルーター側でまとめて管理したい</li></ul>
+<figure><img src="/blog/openwrt/assets/012/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>DHCP予約も最初から全部の機器へ入れる必要はありません。むしろ、重要機器だけ整理したほうが管理しやすくなります。</p>
+<p>まずは次の3種類だけ押さえれば、かなり整理しやすくなります。</p>
+<ol><li>NASやサーバー</li><li>プリンター</li><li>防犯カメラや業務端末</li></ol>
+<p>「IPが変わると困る機器」から順に予約していくと、無理なく整理できます。</p>
+<p>スマートフォンや一時端末まで最初から固定IP化する必要はありません。</p>
+<h2>設定前に現在のDHCP状態を保存する</h2>
+<p>DHCP予約は <code>dhcp</code> 設定を変更します。GuestやCameraなど複数ネットワークを作っている場合は <code>network</code> 側の範囲も合わせて確認します。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/dhcp-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in dhcp network; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+ip addr show &gt; &quot;$BACKUP_DIR/ip-addr.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>DHCPリースには端末名やMACアドレスが含まれるため、そのまま公開場所へ貼らないようにします。</p>
+<h2>用語ミニ解説</h2>
+<ul><li>IPアドレス: ネットワーク上の住所です。例: <code>192.168.1.20</code></li><li>DHCP: ルーターが端末へIPアドレスを自動で配る仕組みです。</li><li>DHCP予約（Static Lease）: 特定の端末へ、いつも同じIPアドレスを渡す設定です。</li><li>MACアドレス: 端末ごとに付いている識別番号（例: <code>aa:bb:cc:dd:ee:ff</code>）。DHCP予約に使います。</li></ul>
+<h2>DHCP予約が必要な機器の種類</h2>
+<table><thead><tr><th>機器</th><th>DHCP予約が必要な理由</th></tr></thead><tbody><tr><td>NAS</td><td>IPが変わるとバックアップ設定・スマートフォンアプリが壊れる</td></tr><tr><td>プリンター</td><td>IPが変わるとPCからの印刷設定が無効になる</td></tr><tr><td>防犯カメラ</td><td>録画ソフトや監視アプリの接続設定が壊れる</td></tr><tr><td>POS端末</td><td>業務システムが特定IPで動く場合がある</td></tr><tr><td>管理PC</td><td>VPN設定やリモートデスクトップのアクセス先が変わる</td></tr></tbody></table>
+<p>逆に、スマートフォンや一時利用PCのように「IPが変わっても困らない端末」は、通常DHCPのままで十分なことが多いです。</p>
+<p>家庭や小さなオフィスでは、「全部固定IP」より、「重要機器だけDHCP予約」のほうが管理しやすいです。</p>
+<p>端末交換時も、ルーター側の設定変更だけで済みやすくなります。</p>
+<h2>DHCP予約の設定手順（LuCI）</h2>
+<h3>ステップ1: 端末のMACアドレスを確認する</h3>
+<p><strong>接続中の端末から確認する方法:</strong></p>
+<ol><li><strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Active DHCP Leases</strong> タブを開く</li><li>接続中の端末の一覧が表示される</li><li>予約したい端末のMACアドレス（例: <code>a4:c3:f0:01:23:45</code>）をメモする</li></ol>
+<p>まずは、現在つながっている端末を一覧で把握するところから始めます。</p>
+<p>LuCIのActive DHCP Leases画面は、「どの端末がどのIPを使っているか」を確認する時にもかなり便利です。</p>
+<p><strong>CLIで確認する場合:</strong></p>
+<pre><code class="language-sh"># 現在のDHCPリース一覧
+cat /tmp/dhcp.leases
+# 出力例: 1715000000 a4:c3:f0:01:23:45 192.168.1.105 nas-home *
+# 形式:    有効期限  MACアドレス          IPアドレス    ホスト名</code></pre>
+<p><code>cat /tmp/dhcp.leases</code> は、現在どの端末へIPが配られているかを確認する時に便利です。</p>
+<p>CLIは、最初は設定変更より「今どう割り当てられているか」を確認する用途で使うくらいで十分です。</p>
+<p><strong>端末側で確認する方法:</strong></p>
+<ul><li>Windows: <code>ipconfig /all</code> → 「物理アドレス」</li><li>Mac: 設定 → ネットワーク → 接続中のWi-Fi/有線 → 詳細 → ハードウェア</li><li>iPhone/Android: Wi-Fi設定 → 接続中のSSIDの詳細画面</li></ul>
+<h3>ステップ2: DHCP予約を追加する</h3>
+<ol><li><strong>Network</strong> → <strong>DHCP and DNS</strong> を開く</li><li><strong>Static Leases</strong> タブを選択</li><li><strong>Add</strong> をクリック</li><li>以下を入力:</li></ol>
+<table><thead><tr><th>フィールド</th><th>入力値</th><th>例</th></tr></thead><tbody><tr><td>Hostname</td><td>端末の名前</td><td><code>nas-home</code></td></tr><tr><td>MAC address</td><td>端末のMACアドレス</td><td><code>a4:c3:f0:01:23:45</code></td></tr><tr><td>IP address</td><td>割り当てるIPアドレス</td><td><code>192.168.1.10</code></td></tr></tbody></table>
+<ol><li><strong>Save</strong> をクリック</li><li>他の機器も同様に追加する</li><li>全部追加したら <strong>Apply</strong> をクリック</li></ol>
+<p>最初は「nas-home」「printer-living」のように、役割が分かる名前を付けておくと、あとから管理しやすくなります。</p>
+<h3>ステップ3: 端末を再接続して確認する</h3>
+<p>予約設定後は、端末のWi‑Fiをオフにしてからオンへ戻し、再接続します。</p>
+<p>IPアドレスが予約した値になっていることを確認します。</p>
+<p>端末のIPアドレス確認方法:</p>
+<ul><li>Windows: <code>ipconfig</code> コマンドで確認</li><li>Mac: 設定 → ネットワーク → 使用中の接続 → IPアドレス</li><li>スマートフォン: Wi-Fi設定の接続済みSSIDの詳細</li></ul>
+<p>ここで「再接続後も同じIPを取る」ことが確認できれば、DHCP予約は正常に動いています。</p>
+<h2>IPアドレス体系の設計</h2>
+<p>場当たり的にIPを割り当てると、後からかなり混乱しやすくなります。</p>
+<p>用途ごとに範囲を決めておくと、あとから見返した時にも整理しやすくなります。</p>
+<h3>家庭向けの設計例</h3>
+<table><thead><tr><th>範囲</th><th>用途</th></tr></thead><tbody><tr><td>192.168.1.1</td><td>ルーター（LN6001-JP）</td></tr><tr><td>192.168.1.10–19</td><td>NAS・サーバー</td></tr><tr><td>192.168.1.20–29</td><td>プリンター</td></tr><tr><td>192.168.1.30–49</td><td>IoTカメラ・家電</td></tr><tr><td>192.168.1.100–199</td><td>通常のDHCP端末（スマートフォン・PC）</td></tr><tr><td>192.168.1.200–220</td><td>来客・一時端末</td></tr></tbody></table>
+<p>最初はここまで細かく分けなくても大丈夫です。</p>
+<p>まずは「予約IP帯」と「通常DHCP帯」を分けるだけでも、かなり管理しやすくなります。</p>
+<h3>小さなオフィス向けの設計例</h3>
+<table><thead><tr><th>ネットワーク</th><th>範囲</th><th>用途</th></tr></thead><tbody><tr><td>Staff（LAN）</td><td>192.168.1.0/24</td><td>管理PC・業務端末</td></tr><tr><td>Guest</td><td>192.168.2.0/24</td><td>来客Wi-Fi</td></tr><tr><td>Camera</td><td>192.168.3.0/24</td><td>防犯カメラ</td></tr><tr><td>予約帯</td><td>192.168.x.10–30</td><td>固定IP端末</td></tr><tr><td>DHCP帯</td><td>192.168.x.100–200</td><td>自動割り当て端末</td></tr></tbody></table>
+<p>GuestやCameraを別ネットワークへ分けている場合は、それぞれのネットワーク内でも「予約帯」と「DHCP帯」を分けておくと整理しやすくなります。</p>
+<h2>機器管理表を作る</h2>
+<p>設定画面を触る前に、機器一覧表を作っておくと管理がかなり楽になります。</p>
+<p>特にNAS、プリンター、カメラが増えてくると、「どのIPがどの機器だったか」を見失いやすくなります。</p>
+<table><thead><tr><th>機器名</th><th>用途</th><th>接続方法</th><th>MACアドレス</th><th>予約IP</th><th>設置場所</th></tr></thead><tbody><tr><td>nas-home</td><td>写真・バックアップ</td><td>有線</td><td>a4:c3:f0:01:23:45</td><td>192.168.1.10</td><td>書斎</td></tr><tr><td>printer-living</td><td>印刷</td><td>Wi-Fi 2.4G</td><td>b8:27:eb:11:22:33</td><td>192.168.1.20</td><td>リビング</td></tr><tr><td>camera-front</td><td>監視</td><td>有線</td><td>dc:a6:32:44:55:66</td><td>192.168.1.31</td><td>玄関</td></tr></tbody></table>
+<p>この表は、Markdown、Excel、Googleスプレッドシートなど、自分が管理しやすい形式で十分です。</p>
+<p>LuCIのDHCP一覧からMACアドレスをコピーすると、比較的楽に整理できます。</p>
+<h2>CLIでDHCP予約を管理する</h2>
+<p>DHCP予約はCLIでも設定できますが、最初はLuCIから設定したほうが状態を理解しやすいです。</p>
+<p>CLIを使う場合も、まず現在設定を確認してから変更するほうが安全です。</p>
+<h3>現在の設定を確認する</h3>
+<pre><code class="language-sh">echo &quot;### DHCP config&quot;
+uci show dhcp
+
+echo &quot;### active leases&quot;
+cat /tmp/dhcp.leases
+
+echo &quot;### static lease entries&quot;
+uci show dhcp | grep -A 4 &#x27;host&#x27;</code></pre>
+<p><code>uci show dhcp</code> と <code>cat /tmp/dhcp.leases</code> は、現在のDHCP状態を確認する時にかなり便利です。</p>
+<h3>CLIで予約を追加する</h3>
+<pre><code class="language-sh">echo &quot;### backup DHCP config&quot;
+cp /etc/config/dhcp /etc/config/dhcp.backup.$(date +%Y%m%d-%H%M)
+
+echo &quot;### add static lease&quot;
+uci add dhcp host
+uci set dhcp.@host[-1].name=&#x27;nas-home&#x27;
+uci set dhcp.@host[-1].mac=&#x27;a4:c3:f0:01:23:45&#x27;
+uci set dhcp.@host[-1].ip=&#x27;192.168.1.10&#x27;
+uci changes dhcp
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+
+echo &quot;### verify static lease&quot;
+uci show dhcp | grep -A 4 &#x27;@host&#x27;
+logread | grep -i dnsmasq | tail -n 50</code></pre>
+<p>CLIで追加した場合も、最後にLuCIのStatic Leases画面で確認しておくと安心です。</p>
+<h3>ホスト名でアクセスできるようにする（ローカルDNS）</h3>
+<p>DHCP予約でホスト名を設定すると、<code>nas-home.lan</code> や <code>nas-home</code> のような名前でアクセスできるようになります（dnsmasqの機能）:</p>
+<p>IPアドレスを覚えなくてもアクセスしやすくなるため、家庭でもかなり便利です。</p>
+<p>LuCIの <strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Hostnames</strong> タブで手動ホスト名も追加できます。</p>
+<p>NASやプリンターが増えてくると、「IPアドレス管理」より「名前管理」のほうが分かりやすくなることがあります。</p>
+<h2>DHCP配布範囲の設定確認</h2>
+<p>DHCP予約と配布範囲が重複しないようにします。</p>
+<p>ここがDHCP管理で一番つまずきやすいポイントです。</p>
+<h3>LuCIで確認</h3>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <code>lan</code> の <strong>Edit</strong></li><li><strong>DHCP Server</strong> タブで Start と Limit を確認</li></ol>
+<p>例: Start=<code>100</code>、Limit=<code>150</code> の場合、<code>192.168.1.100</code>〜<code>192.168.1.249</code> がDHCP配布範囲になります。予約IPはこの範囲<strong>外</strong>（例: <code>192.168.1.10</code>〜<code>192.168.1.50</code>）に設定します。</p>
+<p>最初は「予約は10〜50」「通常DHCPは100以降」のように、大きく離しておくと管理しやすくなります。</p>
+<h3>CLIで確認</h3>
+<pre><code class="language-sh">echo &quot;### LAN DHCP range&quot;
+uci get dhcp.lan.start   # 例: 100
+uci get dhcp.lan.limit   # 例: 150
+
+echo &quot;### all DHCP ranges&quot;
+uci show dhcp | grep -E &#x27;interface|start|limit|leasetime&#x27;</code></pre>
+<h2>端末交換時の対応</h2>
+<p>端末を交換した場合（NAS・カメラ・プリンターの買い替え等）も、DHCP予約なら比較的楽に引き継げます:</p>
+<ol><li>古い予約のMACアドレスを新しい端末のMACアドレスに変更する</li><li>LuCI: <strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Static Leases</strong> → 対象を <strong>Edit</strong></li><li>MACアドレスを新しい端末の値に変更 → <strong>Save &amp; Apply</strong></li></ol>
+<p>この操作だけで、同じIPアドレスを新しい端末に引き継げます。端末側・接続先システム側の設定変更が不要になります。</p>
+<p>端末側へ固定IPを直接設定している場合より、入れ替え時の手戻りを減らしやすいところがDHCP予約のメリットです。</p>
+<h2>よくある失敗と対処</h2>
+<p>DHCP予約で困る時は、「端末が古いIPを持ったまま」か、「予約帯とDHCP帯が重なっている」ケースがかなり多いです。</p>
+<h3>予約後も端末のIPが変わる</h3>
+<p><strong>原因:</strong> 端末が古いリースを保持している <strong>対処:</strong> 端末のWi‑FiをOff/Onするか、<code>ipconfig /release &amp;&amp; ipconfig /renew</code>（Windows）でDHCPを更新する</p>
+<h3>予約したIPに別の端末がいる</h3>
+<p><strong>原因:</strong> DHCP配布範囲と予約IP範囲が重複していて、別端末に同じIPが配布されていた <strong>対処:</strong> DHCP配布範囲（Start/Limit）と予約IP範囲が重複しないよう整理し直す</p>
+<h3>端末のホスト名で名前解決できない</h3>
+<p><strong>確認:</strong> LuCIのDHCP Static Leasesでホスト名が設定されているか確認 <strong>対処:</strong> ホスト名を設定して <code>/etc/init.d/dnsmasq restart</code> を実行</p>
+<h2>まとめ</h2>
+<p>DHCP予約は、次の順番で進めると整理しやすいです:</p>
+<ol><li><strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Static Leases</strong> → <strong>Add</strong></li><li>ホスト名・MACアドレス・IPアドレスを入力して <strong>Save &amp; Apply</strong></li><li>端末を再接続して予約IPが割り当てられたことを確認</li></ol>
+<p>設定前に機器一覧表を作り、IPアドレス体系を整理してから進めると、後からの管理がかなり楽になります。</p>
+<p>特に大事なのは、「DHCP配布範囲」と「予約IP範囲」を重ねないことです。</p>
+<p>最初から全部の端末を固定IP化するより、「IPが変わると困る機器」だけ整理していくほうが、家庭や小さなオフィスでは運用しやすくなります。</p>
+<figure><img src="/blog/openwrt/assets/012/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>固定IPは端末側で設定するよりDHCP予約がいい？</h3>
+<p>家庭や小さなオフィスなら、まずはルーター側のDHCP予約で管理するほうが分かりやすいです。</p>
+<p>端末交換時の手戻りも少なくなり、IP管理をルーター側へまとめやすくなります。</p>
+<h3>DHCP予約が必要な機器はどれ？</h3>
+<p>プリンター、NAS、防犯カメラ、業務PC、VPN先として使う機器など、IPが変わると困る機器に向いています。</p>
+<h3>DHCP予約で一番気をつけることは？</h3>
+<p>DHCP配布範囲と予約IP範囲を重ねないことです。</p>
+<p>先にアドレス設計を決めてから登録すると、あとから機器が増えても整理しやすくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>OpenWrt DHCP configuration: https://openwrt.org/docs/guide-user/base-system/dhcp</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

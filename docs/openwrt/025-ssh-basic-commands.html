@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n99897dd3cae6">SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】</a></p></blockquote>
+<h1>SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JPへSSH接続すると、LuCIだけでは見えにくい状態確認や詳細ログを確認できます。</p>
+<p>特にOpenWrt系では、<code>ifstatus</code>、<code>logread</code>、<code>uci show</code> などを使えるようになるだけでも、トラブル時の切り分けがかなりしやすくなります。</p>
+<p>ただし、最初からCLIで全部設定変更しなくても大丈夫です。</p>
+<p>まずは「状態確認」「ログ確認」「バックアップ」だけ覚えるくらいでも、かなり運用しやすくなります。</p>
+<p>この記事では、LN6001-JPでまず覚えておきたいSSHコマンド、LuCIとCLIの使い分け、設定変更前に意識したいポイントを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/025/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JPでまず覚えたいSSHコマンド</li><li>状態確認と設定変更をどう分けるか</li><li>LuCIとSSHをどう併用すると扱いやすいか</li><li>CLIで触る前に確認したいポイント</li></ul>
+<p>OpenWrt系では、LuCIとSSHを両方使えるようになると、かなり状態把握しやすくなります。</p>
+<p>最初は「設定変更」より、「今どう動いているか」を見る用途でSSHを使うくらいでも十分です。</p>
+<h2>LN6001-JPでのCLI基本作法</h2>
+<p>この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。</p>
+<p>LN6001-JPでは、いきなり設定を書き換えるより、次の順番で進めると安全です。</p>
+<ol><li>読み取りコマンドで現在状態を見る</li><li>変更対象の設定ファイルをバックアップする</li><li><code>uci set</code> で小さく変更する</li><li><code>uci changes</code> で差分を確認する</li><li><code>uci commit &lt;config&gt;</code> で対象設定だけ保存する</li><li>必要なサービスだけ再起動する</li><li><code>ifstatus</code>、<code>wifi status</code>、<code>logread</code> で変更後を確認する</li></ol>
+<p>特にLAN IP、VLAN、firewall、Wi-Fi設定は、間違えるとLuCIやSSHへ戻れなくなることがあります。変更前に有線LANで接続し、バックアップを取ってから進めます。</p>
+<h3>まず取っておくベースライン</h3>
+<p>SSHへ入ったら、最初にこの程度を控えておくと、あとで状態比較しやすくなります。</p>
+<pre><code class="language-sh">date
+ubus call system board
+uname -a
+uptime
+free
+df -h
+
+# 主要パッケージの確認
+opkg list-installed | grep -E &#x27;base-files|busybox|dnsmasq|firewall|dropbear|uhttpd&#x27;</code></pre>
+<p>この出力にはファームウェア情報や内部IP、ホスト名が含まれることがあります。公開の場所にそのまま貼らず、必要な範囲だけ共有してください。</p>
+<h3>設定変更前のまとめバックアップ</h3>
+<p>CLIで設定を触る前に、最低限この5つを保存しておくと復旧しやすくなります。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/config-backup-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp system; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>このバックアップはルーター内に保存されます。大きな変更前は、LuCIの <strong>System</strong> → <strong>Backup / Flash Firmware</strong> からPCにもバックアップを保存しておくほうが安全です。</p>
+<h3>変更する時のUCIテンプレート</h3>
+<p>実際に設定を変更する時は、次の型を崩さないようにします。</p>
+<pre><code class="language-sh"># 1. まず対象設定を読む
+uci show network
+
+# 2. 対象ファイルをバックアップ
+cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d-%H%M)
+
+# 3. 変更を1つだけ入れる（例: LAN IP変更。実行前に接続先が変わる点に注意）
+uci set network.lan.ipaddr=&#x27;192.168.10.1&#x27;
+
+# 4. 未保存の変更を確認
+uci changes
+
+# 5. 問題なければ保存
+uci commit network
+
+# 6. 反映。SSH/LuCIが切れる可能性あり
+/etc/init.d/network restart</code></pre>
+<p>上のLAN IP変更は例です。実際に実行すると管理画面のURLが変わります。普段はLuCIで変更し、CLIでは読み取りとバックアップを中心に使うほうが安全です。</p>
+<h3>rollbackの基本</h3>
+<p>設定変更後におかしくなった場合は、バックアップしたファイルを戻して対象サービスを再起動します。</p>
+<pre><code class="language-sh"># 例: network設定を戻す
+cp /etc/config/network.backup.YYYYMMDD-HHMM /etc/config/network
+/etc/init.d/network restart
+
+# 例: firewall設定を戻す
+cp /etc/config/firewall.backup.YYYYMMDD-HHMM /etc/config/firewall
+/etc/init.d/firewall restart
+
+# 例: Wi-Fi設定を戻す
+cp /etc/config/wireless.backup.YYYYMMDD-HHMM /etc/config/wireless
+wifi reload</code></pre>
+<p><code>network restart</code> や <code>wifi reload</code> は接続が切れることがあります。有線LAN接続と、必要なら本体リセットできる状態を用意してから実行します。</p>
+<figure><img src="/blog/openwrt/assets/025/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>SSHログイン方法</h2>
+<p><strong>Mac/Linux（ターミナル）:</strong></p>
+<pre><code class="language-sh">ssh root@192.168.1.1</code></pre>
+<p><strong>Windows（PowerShellまたはコマンドプロンプト）:</strong></p>
+<pre><code class="language-powershell">ssh root@192.168.1.1</code></pre>
+<p>初回接続時は fingerprint の確認メッセージが出るので <code>yes</code> と入力します。</p>
+<p>パスワードはLuCIのadmin（root）パスワードと同じです。</p>
+<p>SSH接続そのものの流れは、033の記事でより詳しくまとめています。</p>
+<p>最初は、有線LAN接続でSSH確認するほうが切り分けしやすくなります。</p>
+<p>---</p>
+<h2>システム状態確認コマンド</h2>
+<p>SSHへ入れたら、まず「今の状態を見る」コマンドから覚えるほうが整理しやすくなります。</p>
+<pre><code class="language-sh"># ルーターのモデル・ファームウェアバージョン確認
+ubus call system board
+
+# 起動時間・ロードアベレージ確認
+uptime
+
+# メモリ使用量確認
+free
+
+# ストレージ使用量確認
+df -h
+
+# 実行中のプロセス一覧
+ps
+
+# カーネルバージョン確認
+uname -r</code></pre>
+<p><code>ubus call system board</code>、<code>uptime</code>、<code>free</code> は、まず最初に確認したいコマンドです。</p>
+<p>最初は「CPUやメモリが異常に重くないか」を見られるだけでもかなり役立ちます。</p>
+<p>---</p>
+<h2>ネットワーク状態確認コマンド</h2>
+<p>OpenWrt系では、「WAN」「LAN」「Wi‑Fi」を分けて確認することがかなり重要です。</p>
+<pre><code class="language-sh"># IPアドレス一覧（全インターフェース）
+ip addr show
+
+# ルーティングテーブル
+ip route show
+
+# IPv6アドレス
+ip -6 addr show
+
+# IPv6ルーティングテーブル
+ip -6 route show
+
+# WANインターフェースの詳細状態（JSON形式）
+ifstatus wan
+ifstatus wan6
+
+# WANのIPアドレスだけ抜き出す
+ifstatus wan | grep &#x27;&quot;ipaddr&quot;&#x27;
+ifstatus wan6 | grep &#x27;&quot;ip6addr&quot;&#x27;
+
+# Wi-Fiインターフェース一覧と状態
+wifi status
+
+# 接続中の無線端末一覧
+# 実際のwlan名は環境ごとに変わるため、先に iw dev で確認
+iw dev
+iw dev &lt;wlan名&gt; station dump
+
+# ARPテーブル（LANに接続している端末のMACアドレス）
+cat /proc/net/arp
+
+# DHCPリース一覧
+cat /tmp/dhcp.leases</code></pre>
+<p><code>ifstatus wan</code> と <code>ifstatus wan6</code> は、まず最初に覚えておきたいコマンドです。</p>
+<p>IPoE環境では、「WANは正常だがWAN6だけ落ちている」ケースもあります。</p>
+<h3>LN6001-JP向けネットワーク診断パック</h3>
+<p>原因が分からない時は、次の順番で見るとWAN、IPv6、DNS、DHCPをまとめて確認できます。</p>
+<pre><code class="language-sh">echo &quot;### interfaces&quot;
+ifstatus wan
+ifstatus wan6
+
+echo &quot;### addresses&quot;
+ip addr show
+
+echo &quot;### routes&quot;
+ip route show
+ip -6 route show
+
+echo &quot;### dns&quot;
+cat /tmp/resolv.conf* 2&gt;/dev/null
+uci show dhcp | grep -E &#x27;dns|server|dhcp_option|ignore&#x27; || true
+
+echo &quot;### dhcp leases&quot;
+cat /tmp/dhcp.leases</code></pre>
+<p>この出力で、WANがupか、IPv4/IPv6アドレスがあるか、DNS配布が不自然でないかをまとめて確認できます。</p>
+<p>---</p>
+<h2>DNS確認コマンド</h2>
+<p>DNS問題は、「インターネット全部が落ちた」と誤解しやすいポイントです。</p>
+<pre><code class="language-sh"># DNS解決テスト
+nslookup google.co.jp
+nslookup google.co.jp 127.0.0.1   # ルーター自身のDNSサーバーで確認
+nslookup google.co.jp 8.8.8.8     # GoogleのDNSで直接確認
+
+# pingで疎通確認
+ping -c 3 8.8.8.8         # IPv4
+ping6 -c 3 2001:4860:4860::8888   # IPv6
+
+# adblockのブロックリスト確認
+grep example.com /tmp/adblock/*.txt 2&gt;/dev/null</code></pre>
+<p>最初は「IPアドレスへpingできるか」と「名前解決だけ失敗しているか」を分けるだけでもかなり役立ちます。</p>
+<p>---</p>
+<h2>UCIコマンド（設定の確認と変更）</h2>
+<p>UCI（Unified Configuration Interface）は、OpenWrtの設定システムです。</p>
+<p>CLI設定変更では、最初は <code>uci show</code> や <code>uci get</code> で「読む」ことを優先したほうが安全です。</p>
+<pre><code class="language-sh"># 設定ファイルの内容を表示
+uci show network        # ネットワーク設定
+uci show wireless       # Wi-Fi設定
+uci show firewall       # ファイアウォール設定
+uci show dhcp           # DHCP・DNS設定
+uci show system         # システム設定
+
+# 特定のパラメータを確認
+uci get network.lan.ipaddr
+uci show wireless | grep ssid
+
+# 変更前にバックアップ
+cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d)
+cp /etc/config/wireless /etc/config/wireless.backup.$(date +%Y%m%d)
+
+# LAN IPのような基本項目を変更する場合は、LuCIでの操作を優先
+# CLIで変更する場合も、実機のセクション名を uci show で確認してから行う</code></pre>
+<p>最初は「network」「wireless」「firewall」「dhcp」の4つだけ読めればかなり役立ちます。</p>
+<blockquote><p><strong>注意</strong>: <code>uci set</code> / <code>uci commit</code> は設定を実際に変更します。</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>Wi‑Fi名やLAN IPは環境ごとにセクション名が異なるため、この記事では読み取り中心にしています。</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>最初はLuCI側で変更し、SSHでは状態確認中心にするほうが安全です。</p></blockquote>
+<p>---</p>
+<h2>サービス管理コマンド</h2>
+<p>OpenWrt系では、「設定変更後にサービス再起動が必要」なケースがあります。</p>
+<pre><code class="language-sh"># サービスの再起動
+/etc/init.d/network restart
+/etc/init.d/firewall restart
+/etc/init.d/dnsmasq restart    # DNS/DHCPサーバー
+/etc/init.d/uhttpd restart     # LuCI (Webサーバー)
+/etc/init.d/adblock restart    # adblock
+# TailscaleはLinksys公式モジュール導入後に存在する場合のみ
+/etc/init.d/tailscale restart
+
+# サービスの起動・停止
+/etc/init.d/adblock start
+/etc/init.d/adblock stop
+
+# 起動時の自動起動を有効化・無効化
+/etc/init.d/adblock enable
+/etc/init.d/adblock disable
+
+# Wi-Fiの再読み込み
+wifi reload
+
+# ネットワーク全体の再起動（切断注意）
+/etc/init.d/network restart</code></pre>
+<p>最初は <code>dnsmasq</code>、<code>network</code>、<code>uhttpd</code> の3つだけ覚えておけばかなり役立ちます。</p>
+<p>特に <code>/etc/init.d/network restart</code> は通信断が発生するため注意します。</p>
+<p>---</p>
+<h2>ログ確認コマンド</h2>
+<p>SSHの強みは、「LuCIでは見えにくいログを直接見られること」です。</p>
+<pre><code class="language-sh"># システムログ（全件）
+logread
+
+# 末尾50行
+logread | tail -n 50
+
+# リアルタイムでログを表示
+logread -f
+
+# dnsmasq（DNS/DHCP）のログ
+logread | grep dnsmasq
+
+# ファイアウォール（DROP/REJECT）のログ
+logread | grep -E &#x27;DROP|REJECT&#x27;
+
+# WAN接続のログ
+logread | grep -i wan
+
+# Wi-Fiのログ
+logread | grep -i wifi</code></pre>
+<p><code>logread | tail -n 50</code> は、まず最初に覚えておきたいログ確認方法です。</p>
+<p>最初は「error」「fail」「reject」が大量に出ていないかを見るくらいでも十分役立ちます。</p>
+<h3>firewallの実適用状態を見る</h3>
+<p>LuCIやUCIで見えるfirewall設定と、実際に適用されているルールは分けて確認します。</p>
+<pre><code class="language-sh"># 設定として保存されているfirewall
+uci show firewall
+
+# 実際に適用されているルール（LN6001-JPではまずiptablesを見る）
+command -v iptables &gt;/dev/null &amp;&amp; iptables -L -n -v | head -n 80
+command -v iptables-save &gt;/dev/null &amp;&amp; iptables-save | head -n 120
+
+# nftが入っている環境なら参考確認
+command -v nft &gt;/dev/null &amp;&amp; nft list ruleset | head -n 120</code></pre>
+<p>一般的な最新OpenWrt記事では <code>nft</code> / fw4 前提の説明を見かけますが、LN6001-JPの製品ファームウェアで確認する時は、まず <code>uci show firewall</code> と <code>iptables</code> 系の出力を見るほうが現実的です。</p>
+<h3>サポート相談前に集めるログ</h3>
+<p>サポートや詳しい人へ相談する前に、次の読み取りコマンドを取っておくと説明しやすくなります。</p>
+<pre><code class="language-sh">echo &quot;### system&quot;
+date
+ubus call system board
+uptime
+
+echo &quot;### interfaces&quot;
+ifstatus wan
+ifstatus wan6
+ip addr show
+ip route show
+ip -6 route show
+
+echo &quot;### dns-dhcp&quot;
+cat /tmp/resolv.conf* 2&gt;/dev/null
+cat /tmp/dhcp.leases
+uci show dhcp | grep -E &#x27;dns|server|dhcp_option|ignore&#x27; || true
+
+echo &quot;### wifi&quot;
+wifi status
+iw dev
+
+echo &quot;### firewall&quot;
+uci show firewall
+command -v iptables &gt;/dev/null &amp;&amp; iptables -L -n -v | head -n 80
+
+echo &quot;### recent logs&quot;
+logread | tail -n 120</code></pre>
+<p>ただし、ログにはMACアドレス、内部IP、端末名、SSID、プロバイダ情報が含まれることがあります。noteのコメント欄やSNSなど、公開の場所へそのまま貼らないでください。</p>
+<p>---</p>
+<h2>ファイル操作</h2>
+<p>OpenWrt系では、設定ファイルを直接読むことで「LuCIで何が設定されているか」を理解しやすくなります。</p>
+<pre><code class="language-sh"># 設定ファイルの確認
+cat /etc/config/network
+cat /etc/config/wireless
+cat /etc/config/firewall
+
+# 設定ファイルをバックアップ
+cp /etc/config/network /etc/config/network.bak
+
+# テキストエディタで編集（viが標準搭載）
+vi /etc/config/network</code></pre>
+<p>最初は <code>cat</code> で読むだけでもかなり役立ちます。</p>
+<p><code>vi</code> 編集は、慣れてから少しずつ触るくらいでも十分です。</p>
+<blockquote><p>viの基本操作: <code>i</code> で挿入モード、<code>ESC</code> でコマンドモード、<code>:wq</code> で保存・終了、<code>:q!</code> で保存せず終了</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>最初は「保存せず閉じる（:q!）」を覚えておくだけでも安心感がかなり変わります。</p></blockquote>
+<p>---</p>
+<h2>よく使うコマンドの組み合わせ</h2>
+<p>慣れてくると、「複数確認を1行でまとめる」と状態把握しやすくなります。</p>
+<pre><code class="language-sh"># WANのIPとDNSを一気に確認
+ifstatus wan | grep -E &#x27;&quot;ipaddr&quot;|&quot;dns&quot;&#x27;
+
+# 接続中の全端末（MACアドレス・IP・ホスト名）
+cat /tmp/dhcp.leases
+
+# ルーターの基本情報を一画面で確認
+ubus call system board &amp;&amp; uptime &amp;&amp; free &amp;&amp; df -h
+
+# 現在の設定を変更する前にバックアップ
+cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d)</code></pre>
+<p>最初は <code>ifstatus wan</code>、<code>cat /tmp/dhcp.leases</code>、<code>logread | tail -n 50</code> の3つを中心に見るだけでもかなり役立ちます。</p>
+<p>---</p>
+<h2>まとめ</h2>
+<p>最初は全部を覚える必要はありません。</p>
+<p>まずは <code>ubus call system board</code>、<code>ifstatus wan</code>、<code>cat /tmp/dhcp.leases</code>、<code>logread | tail -n 50</code> の4つを触れるようになるだけでも、トラブル時の見え方がかなり変わります。</p>
+<p>設定変更はLuCI、細かな確認はSSH、という分け方で使うと整理しやすくなります。</p>
+<p>最初は「状態確認できること」を優先するだけでも十分です。</p>
+<figure><img src="/blog/openwrt/assets/025/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのSSHで最初に覚えるべきコマンドは？</h3>
+<p><code>ubus call system board</code>、<code>ifstatus wan</code>、<code>cat /tmp/dhcp.leases</code>、<code>logread | tail -n 50</code> の4つからで十分です。</p>
+<p>最初は「WAN状態」「接続端末」「直近ログ」が見えるだけでもかなり役立ちます。</p>
+<h3>LN6001-JPはSSHで設定変更までやるべき？</h3>
+<p>慣れるまでは状態確認とバックアップ中心で十分です。</p>
+<p>日常的な設定変更はLuCIのほうが安全に進めやすくなります。</p>
+<h3>LN6001-JPでSSHが使えると何が便利？</h3>
+<p>LuCIでは見えにくいログやインターフェース状態を直接確認できます。</p>
+<p>特に <code>ifstatus</code> や <code>logread</code> を見られるようになると、トラブル時の切り分けがかなりしやすくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

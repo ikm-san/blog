@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n1a83908a226c">WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】</a></p></blockquote>
+<h1>WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>外出先から自宅や小さなオフィスへ安全に接続するには、VPN設計が必要です。</p>
+<p>LN6001-JPでは、Linksys公式サポート（https://support.linksys.com/kb/article/8723-jp/）でWireGuardおよびTailscaleの公式モジュールが案内されています。</p>
+<p>ただし、最初から「どちらが最強か」を決める必要はありません。</p>
+<p>固定IPやポート開放が使えるならWireGuard、自宅回線条件を気にせず始めたいならTailscale、くらいの分け方でも十分です。</p>
+<p>また、VPNは「つながれば終わり」ではなく、「どこまでアクセスを許可するか」もかなり重要です。</p>
+<p>この記事では、WireGuardとTailscaleそれぞれの特徴、Linksys公式モジュール前提での設定手順、アクセス範囲の考え方を、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/013/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JPでWireGuardとTailscaleをどう選ぶか</li><li>固定IPやポート開放が必要かどうか</li><li>Linksys公式モジュール前提での安全な進め方</li><li>VPN接続後のアクセス範囲をどう絞るべきか</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>外出先から自宅や小さなオフィスへ安全に入りたい</li><li>固定IPがなくてもリモート接続したい</li><li>WireGuardとTailscaleのどちらから始めるべきか迷っている</li></ul>
+<figure><img src="/blog/openwrt/assets/013/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>VPNも最初から大きく作り込まなくて大丈夫です。むしろ、最初は「必要最低限だけ入れる」ほうが安全です。</p>
+<p>まずは次の3つを決めれば十分です。</p>
+<ol><li>固定IPやポート開放が使えるか確認する</li><li>条件に合うほうをWireGuardかTailscaleから1つ選ぶ</li><li>接続後は必要最小限の端末だけアクセス可能にする</li></ol>
+<p>まずは「安全につながること」と「入れる範囲を広げすぎないこと」を優先すると整理しやすいです。</p>
+<p>VPNは、LAN全体を無条件で公開するより、「必要な機器へだけ入れる」くらいから始めるほうが扱いやすくなります。</p>
+<h2>導入前に現在の状態を保存する</h2>
+<p>VPN設定は <code>network</code>、<code>firewall</code>、パッケージ状態、回線方式に影響します。VPN Assistantを入れる前に、現在の状態を控えておきます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/vpn-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ubus call system board &gt; &quot;$BACKUP_DIR/system-board.json&quot;
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot;
+ifstatus wan6 &gt; &quot;$BACKUP_DIR/ifstatus-wan6.json&quot;
+opkg list-installed &gt; &quot;$BACKUP_DIR/opkg-list-installed.txt&quot;
+ip route show &gt; &quot;$BACKUP_DIR/route-v4.txt&quot;
+ip -6 route show &gt; &quot;$BACKUP_DIR/route-v6.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>VPN設定には鍵や接続先情報が関係するため、設定ファイルやQRコードを公開場所へ貼らないようにします。</p>
+<h2>用語ミニ解説</h2>
+<ul><li>VPN: 暗号化されたトンネルで外部から自宅・事務所LANに接続する仕組みです。</li><li>WireGuard: シンプルで高速なVPNプロトコルです。自宅側でVPN入口を運用します。</li><li>Tailscale: WireGuardをベースにしたVPNサービスです。NAT越えを自動処理します。</li><li>NAT越え（NAT Traversal）: 固定IPやポート開放なしで接続を確立する仕組みです。</li></ul>
+<h2>VPN方式の選び方</h2>
+<table><thead><tr><th>方式</th><th>向く状況</th><th>注意点</th></tr></thead><tbody><tr><td>WireGuard（自前）</td><td>固定IP・ポート開放が可能、経路を自分で管理したい</td><td>固定IPとポート開放の条件を事前確認</td></tr><tr><td>Tailscale</td><td>固定IPなし、IPv4 over IPv6環境、複数端末の管理を楽にしたい</td><td>外部サービスへの依存（Tailscaleのアカウント）</td></tr><tr><td>OpenVPN</td><td>既存システムとの互換性が必要</td><td>速度はWireGuardより劣ることが多い</td></tr></tbody></table>
+<p>最初に迷った場合は、「固定IPやポート開放を自分で管理したいか」で考えると整理しやすいです。</p>
+<p>自宅回線条件をあまり気にせず始めたいならTailscale、経路や構成を自分で把握したいならWireGuardが向いています。</p>
+<p>まずは1つだけ選んで試すほうが分かりやすいです。</p>
+<p>最初からWireGuardとTailscaleを同時運用すると、どちら経由で通信しているか分かりにくくなることがあります。</p>
+<h2>WireGuardの設定手順</h2>
+<p>WireGuardは、自宅やオフィス側へVPN入口を作るイメージです。</p>
+<p>そのため、まず「外部から自宅へ入れる条件があるか」を確認するところから始めます。</p>
+<h3>事前確認: 固定IPとポート開放</h3>
+<p>WireGuardはLN6001-JPをVPN入口（サーバー）として動かします。インターネット側からアクセスできる条件が必要です。</p>
+<p>確認事項:</p>
+<ul><li>プロバイダー契約で固定IPまたはDDNSサービスを使える状態か</li><li>ホームゲートウェイのポート開放が可能か（IPv4接続の場合）</li><li>IPv4 over IPv6（IPoE）の場合、ポート開放の条件はプロバイダーによって異なる</li></ul>
+<p>特にIPoE（IPv4 over IPv6）環境では、プロバイダー側仕様によってポート開放可否が変わることがあります。</p>
+<p>迷う場合は、まずTailscaleから試したほうが入りやすいです。</p>
+<h3>Linksys公式VPNアシスタントモジュールのインストール</h3>
+<p>通常はLinksys公式サポートページ（https://support.linksys.com/kb/article/8723-jp/）からVPN Assistantモジュールをダウンロードし、LuCIからインストールします。</p>
+<p>上級者向けにWireGuard関連パッケージを個別導入する方法も公式ページにありますが、順番指定があるため、まずVPN Assistantを使うほうが安全です。</p>
+<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開く</li><li><strong>Update lists</strong> をクリックしてパッケージリストを更新し、完了後 <strong>Dismiss</strong> で閉じる</li><li><strong>Upload Package</strong> をクリックし、ダウンロードしたVPN Assistantの <code>.ipk</code> を選択して <strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li><code>installed in root is up to date.</code> と表示されたら <strong>Dismiss</strong></li><li>ルーターを再起動し、LuCIを開き直すと <strong>Services</strong> に <strong>VPN Assistant</strong> が追加される</li></ol>
+<p>最初はCLIで個別パッケージを組み合わせるより、公式モジュールで動く状態を先に作るほうが、トラブルを切り分けやすくなります。</p>
+<p>インストール後は、パッケージとメニュー追加の状態を確認します。</p>
+<pre><code class="language-sh">echo &quot;### VPN related packages&quot;
+opkg list-installed | grep -Ei &#x27;vpn|wireguard|tailscale|luci-app-wireguard|kmod-wireguard&#x27; || true
+
+echo &quot;### services&quot;
+ls /etc/init.d | grep -Ei &#x27;wireguard|tailscale|vpn&#x27; || true
+
+echo &quot;### recent install/service logs&quot;
+logread | grep -Ei &#x27;vpn|wireguard|tailscale|opkg&#x27; | tail -n 80</code></pre>
+<h3>VPN AssistantでWireGuardを設定する</h3>
+<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>WireGuard Server</strong> タブを開く</li><li><strong>Enable WireGuard VPN</strong> を有効にする</li><li>必要な項目を入力し、<strong>Save &amp; Apply</strong> をクリック</li><li>設定反映後、安定運用のためルーターを一度再起動する</li><li><strong>Client Peers</strong> セクションの <strong>Show QR</strong> から、スマートフォン用QRコードまたはテキスト設定を取得する</li></ol>
+<p>QRコードを使うと、スマートフォン側設定をかなり簡単に取り込めます。</p>
+<p>最初はスマートフォン1台だけ接続し、正常動作を確認してからPCや他端末を追加するほうが安全です。</p>
+<p>公式手順ではVPN Assistantを使う流れが主です。</p>
+<p><code>Network</code> → <code>Interfaces</code> でWireGuardインターフェースを手作業で作る方法は、個別パッケージ導入まで理解している場合の上級者向けとして扱います。</p>
+<h3>ファイアウォールの設定</h3>
+<p>VPN Assistantを使う場合は、まずVPN Assistantの画面で保存した設定どおりに動くか確認します。</p>
+<p>以下のUCI例は、手動でWireGuardインターフェースやポート開放を作る場合の参考です。</p>
+<p>公式モジュールで設定した内容と重複しないよう、実行前に現在のfirewall設定を確認してください。</p>
+<pre><code class="language-sh">echo &quot;### backup firewall config&quot;
+cp /etc/config/firewall /etc/config/firewall.backup.$(date +%Y%m%d-%H%M)
+
+echo &quot;### allow WireGuard UDP port 51820&quot;
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;WireGuard&#x27;
+uci set firewall.@rule[-1].src=&#x27;wan&#x27;
+uci set firewall.@rule[-1].dest_port=&#x27;51820&#x27;
+uci set firewall.@rule[-1].proto=&#x27;udp&#x27;
+uci set firewall.@rule[-1].target=&#x27;ACCEPT&#x27;
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart</code></pre>
+<p>CLIは、最初は設定変更より「今どう設定されているか」を確認する用途で使うくらいでも十分です。</p>
+<h3>クライアント側の設定（Windows/Mac/iPhone）</h3>
+<p>WireGuard公式クライアントアプリを使います（iOS/Android/Windows/Mac対応）:</p>
+<p>最初はスマートフォン側から試すほうが、外出先接続を確認しやすくなります。</p>
+<ol><li>WireGuardアプリをインストール</li><li><strong>Add Tunnel</strong> → <strong>Create from scratch</strong> または QRコードを使用</li><li>クライアント設定の例:</li></ol>
+<pre><code class="language-ini">[Interface]
+PrivateKey = &lt;クライアントの秘密鍵&gt;
+Address = 10.0.0.2/24
+DNS = 192.168.1.1
+
+[Peer]
+PublicKey = &lt;ルーター（LN6001-JP）の公開鍵&gt;
+Endpoint = &lt;ルーターの固定IPまたはDDNSホスト名&gt;:51820
+AllowedIPs = 192.168.1.0/24
+PersistentKeepalive = 25</code></pre>
+<p><code>AllowedIPs = 192.168.1.0/24</code> とすることで、自宅LANへのトラフィックのみがVPNを通ります（スプリットトンネル）。<code>0.0.0.0/0</code> にすると全トラフィックがVPN経由になります。</p>
+<p>最初は <code>192.168.1.1/32</code> のように管理画面だけ許可し、必要に応じて範囲を広げる方法も安全です。</p>
+<h3>動作確認</h3>
+<pre><code class="language-sh">echo &quot;### WireGuard status&quot;
+wg show
+
+echo &quot;### WireGuard-related firewall and interfaces&quot;
+uci show firewall | grep -Ei &#x27;wireguard|51820|wg&#x27; || true
+ip addr show | grep -A4 -Ei &#x27;wg|wireguard&#x27; || true
+
+echo &quot;### ping from router to LAN gateway&quot;
+ping 192.168.1.1
+
+echo &quot;### WireGuard logs&quot;
+logread | grep -Ei &#x27;wireguard|wg|51820&#x27; | tail -n 80</code></pre>
+<p><code>wg show</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「接続できているか」を確認する用途で使うくらいで十分です。</p>
+<h2>Tailscaleの設定手順</h2>
+<p>Tailscaleは、固定IPやポート開放をあまり意識せず始めやすいところが特徴です。</p>
+<p>特にIPoEやIPv4 over IPv6環境では、まずTailscaleから始めるほうが入りやすい場合があります。</p>
+<h3>Linksys公式VPNアシスタントモジュールのインストール</h3>
+<p>TailscaleもWireGuardと同じVPN Assistantモジュールから有効化します。Linksys公式サポートページ（https://support.linksys.com/kb/article/8723-jp/）からVPNアシスタントモジュールをダウンロードしてインストールします。</p>
+<ol><li>上記URLからLN6001-JP用のVPNアシスタントモジュール（<code>.ipk</code> ファイル）をPCにダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開き、<strong>Update lists</strong> を実行</li><li><strong>Upload Package</strong> からダウンロードしたファイルを選択して <strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li>完了後にルーターを再起動し、LuCIを開き直す（<strong>Services</strong> に <strong>VPN Assistant</strong> が追加される）</li></ol>
+<h3>VPN AssistantでTailscaleを有効化する</h3>
+<ol><li><strong>Services</strong> → <strong>VPN Assistant</strong> を開く</li><li><strong>Tailscale</strong> タブへ移動する</li><li><strong>Enable Tailscale Service</strong> を有効にする</li><li>必要に応じて <strong>Advertise as Exit Node</strong> を選ぶ</li><li>認証用URLが表示されたらブラウザで開き、Tailscaleアカウントで登録する</li><li>最後に <strong>OK</strong> をクリックし、ルーターの再起動を待つ</li></ol>
+<p>Tailscaleは、複数端末をあとから追加しやすいところも扱いやすいポイントです。</p>
+<p>まずはスマートフォン1台だけ接続確認してから、必要な端末を増やしていくほうが整理しやすくなります。</p>
+<p>Tailscaleアカウントでログインすると、ルーターがTailscaleネットワーク（Tailnet）へ参加します。</p>
+<p>CLIの <code>tailscale status</code> は、設定後の状態確認に使います。</p>
+<h3>LAN全体へのアクセスを許可する（サブネットルーター設定）</h3>
+<p>外出先端末からLN6001-JP配下のLAN全体へアクセスするには、サブネットルーターとして設定します:</p>
+<p>ただし、最初からLAN全体を許可しなくても大丈夫です。</p>
+<p>VPN Assistantでサブネットルーターとして使う設定をした場合は、Tailscale管理コンソール（https://login.tailscale.com/admin/routes）で広告されたルートを承認します。</p>
+<p>CLIで追加設定する場合は、公式UIでの状態と衝突しないよう、変更前に現在のTailscale設定を確認してください。</p>
+<h3>Tailscaleでのアクセス確認</h3>
+<pre><code class="language-sh">echo &quot;### Tailscale status&quot;
+tailscale status
+
+echo &quot;### Tailscale IP&quot;
+tailscale ip
+
+echo &quot;### ping over Tailscale&quot;
+tailscale ping &lt;接続先のTailscaleノード名&gt;
+
+echo &quot;### Tailscale logs&quot;
+logread | grep -Ei &#x27;tailscale|tailscaled&#x27; | tail -n 80</code></pre>
+<p><code>tailscale status</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「どの端末が見えているか」を確認する用途で使うくらいで十分です。</p>
+<h3>起動を自動化する</h3>
+<pre><code class="language-sh">echo &quot;### enable and start tailscale&quot;
+/etc/init.d/tailscale enable
+/etc/init.d/tailscale start
+
+echo &quot;### verify tailscale service&quot;
+/etc/init.d/tailscale status</code></pre>
+<h2>アクセス範囲の設計</h2>
+<table><thead><tr><th>用途</th><th>推奨設定</th></tr></thead><tbody><tr><td>自宅NASだけ</td><td>WireGuard AllowedIPs を NASのIPのみに絞る</td></tr><tr><td>管理画面だけ</td><td>AllowedIPs を <code>192.168.1.1/32</code></td></tr><tr><td>LAN全体</td><td><code>192.168.1.0/24</code></td></tr><tr><td>複数ネットワーク</td><td>VLANの各セグメントをAllowedIPsに追加</td></tr></tbody></table>
+<p>VPNは「LAN全体へ全部入れる」より、「必要な機器へだけ入れる」ほうが安全です。</p>
+<p>特にNASや管理画面だけ使いたい場合は、AllowedIPsを狭くしたほうが整理しやすくなります。</p>
+<p>LAN全体へ広く入れるより、必要な範囲に絞る設計のほうが安全です。</p>
+<p>最初は「NASだけ」「管理画面だけ」くらいから始めると分かりやすくなります。</p>
+<h2>運用上の注意点</h2>
+<p>VPNは「設定したら終わり」ではなく、「どの端末が入れるか」を継続管理することも重要です。</p>
+<h3>鍵・アカウント管理</h3>
+<ul><li>WireGuard: 秘密鍵はバックアップしておく。端末を紛失した場合は、ルーター側のPeer設定から該当端末の公開鍵を削除する</li><li>Tailscale: 管理コンソールから端末を無効化できる。不要端末や紛失端末は早めに無効化する</li></ul>
+<h3>バックアップ</h3>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/vpn-before-change-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+opkg list-installed | grep -Ei &#x27;vpn|wireguard|tailscale&#x27; &gt; &quot;$BACKUP_DIR/vpn-packages.txt&quot; || true
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>VPN設定は network / firewall と関係するため、変更前バックアップを残しておくと安心です。</p>
+<h2>よくある問題と対処</h2>
+<p>設定後は、次の3つが確認できれば最初の段階として十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>スマートフォンやPCからVPN接続できる</li><li>目的のLAN機器へだけ届く</li><li>使っていない範囲まで広く公開していない</li></ul>
+<h3>WireGuardで接続できない</h3>
+<ol><li>ルーターのfirewallでUDPポート51820が開いているか確認</li><li>ホームゲートウェイ側のポート開放設定を確認</li><li><code>wg show</code> で接続状態を確認</li></ol>
+<p>特にIPoE環境では、「ポート開放できていない」ケースがかなり多いです。</p>
+<p>迷う場合は、一度Tailscaleで接続できるか確認すると切り分けしやすくなります。</p>
+<h3>Tailscaleでサブネットへアクセスできない</h3>
+<ol><li>Tailscale管理コンソールでルートの承認を確認</li><li><code>tailscale status</code> でルーターがネットワークに参加しているか確認</li></ol>
+<p>Tailnetへ参加できていても、「ルート承認」が完了していないとLANへ届かないことがあります。</p>
+<h3>VPN接続は成功するがLANにpingが届かない</h3>
+<ul><li><strong>WireGuardの場合:</strong> AllowedIPsにLANの範囲が含まれているか確認</li><li><strong>Tailscaleの場合:</strong> <code>--advertise-routes</code> の設定と管理コンソールの承認状態を確認</li></ul>
+<h2>まとめ</h2>
+<p>VPN設定は、次の順番で進めると整理しやすいです:</p>
+<ol><li>回線条件（固定IP・ポート開放可否）を確認してWireGuard / Tailscaleを選ぶ</li><li>Linksys公式サポート（https://support.linksys.com/kb/article/8723-jp/）の手順でパッケージをインストール</li><li>WireGuardは <strong>Services</strong> → <strong>VPN Assistant</strong> → <strong>WireGuard Server</strong> で設定し、Client PeersのQRコードを使う</li><li>Tailscaleは <strong>Services</strong> → <strong>VPN Assistant</strong> → <strong>Tailscale</strong> で有効化し、認証URLから登録する</li><li>接続後は <code>wg show</code> / <code>tailscale status</code> で状態を確認する</li></ol>
+<p>固定IPやポート開放を管理できるならWireGuard、回線条件をあまり気にせず始めたいならTailscale、という考え方が分かりやすいです。</p>
+<p>最初からLAN全体をVPNへ公開するより、「NASだけ」「管理画面だけ」のように必要な範囲へ絞るほうが安全です。</p>
+<p>公式VPN Assistantモジュールを使って、まずは動く状態を作ってから理解を深めていくほうが、家庭や小さなオフィスでは進めやすくなります。</p>
+<figure><img src="/blog/openwrt/assets/013/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPでWireGuardとTailscaleはどちらが向いている？</h3>
+<p>固定IPがあり、ポート開放もできるならWireGuardが選びやすいです。</p>
+<p>固定IPなし、IPoE環境、複数端末の管理を楽にしたいならTailscaleのほうが始めやすいです。</p>
+<h3>固定IPがなくてもLN6001-JPでVPNは使える？</h3>
+<p>使えます。その場合はTailscaleのほうが現実的です。WireGuardを使うなら、固定IPかDDNS、そしてポート開放の条件を事前に確認する必要があります。</p>
+<h3>IPoE環境ではWireGuardは使えない？</h3>
+<p>必ずしも使えないわけではありません。</p>
+<p>ただし、IPv4 over IPv6の方式やプロバイダー条件によってはポート開放が難しいことがあります。迷う場合は、まずTailscaleを候補にすると判断しやすいです。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys WireGuard/Tailscale公式モジュール設定手順: https://support.linksys.com/kb/article/8723-jp/</li><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>OpenWrt IPoE等インターネットサービスの設定方法: https://support.linksys.com/kb/article/6902-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

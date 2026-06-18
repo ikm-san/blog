@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/nacbd5d573d67">ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】</a></p></blockquote>
+<h1>ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>ゲストWi‑Fiは、来客にインターネット接続を提供しつつ、家庭内LANや業務端末には触れさせないための基本機能です。</p>
+<p>ただ、SSIDを分けるだけでは十分ではありません。同じLANネットワークにつながったままだと、来客端末からNAS、プリンター、ルーター管理画面などが見えてしまうことがあります。</p>
+<p>LN6001-JPはOpenWrtベースなので、SSIDだけでなく、ネットワーク（IPアドレス範囲）や firewall zone まで含めて整理できます。</p>
+<p>最初は難しく見えるかもしれませんが、やること自体はシンプルです。</p>
+<ul><li>Guest用SSIDを作る</li><li>Guest専用ネットワークを作る</li><li>GuestからLANへ入れないようにする</li></ul>
+<p>この記事では、この3つをLuCIで順番に設定していきます。</p>
+<figure><img src="/blog/openwrt/assets/007/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>ゲストWi‑FiでSSIDを分けるだけでは足りない理由</li><li>Guest用ネットワークと firewall zone の作り方</li><li>来客端末をLANへ入れないための確認ポイント</li><li>家庭・店舗でGuest Wi‑Fiをどう分けると運用しやすいか</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>家庭で来客用Wi-Fiを安全に分けたい</li><li>店舗や事務所で、お客様用Wi-Fiと業務用ネットワークを分けたい</li><li>SSIDを分けただけで十分か不安がある</li></ul>
+<figure><img src="/blog/openwrt/assets/007/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>最初から細かなルールを増やしすぎなくても大丈夫です。むしろ、最初はシンプルな分離だけのほうがトラブルも少なくなります。</p>
+<p>まずは次の3つができれば、ゲストWi‑Fiとしては十分に役立ちます。</p>
+<ol><li>Guest用の独立したネットワークを作る</li><li>Guest用SSIDをそのネットワークへ紐付ける</li><li>GuestからLANへ入れないよう firewall zone を分ける</li></ol>
+<p>まずは「インターネットには出られるが、自宅や業務の機器は見えない」状態を作ることが優先です。</p>
+<p>Guest Wi‑Fiは、“便利な来客用回線” というより、“家庭や業務ネットワークを混ぜないための入口” と考えると整理しやすくなります。</p>
+<h2>設定前に現在の状態を控える</h2>
+<p>Guest Wi-Fi設定では、<code>network</code>、<code>wireless</code>、<code>firewall</code>、<code>dhcp</code> をまとめて触ります。変更前に現在の状態を保存しておくと、設定を戻したい時にかなり安心です。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/guest-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ifstatus lan &gt; &quot;$BACKUP_DIR/ifstatus-lan.json&quot; 2&gt;/dev/null || true
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot; 2&gt;/dev/null || true
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot;
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>バックアップにはSSIDやWi-Fi関連の情報が含まれるため、そのまま公開場所へ貼り付けないようにします。</p>
+<h2>なぜSSIDを分けるだけでは足りないか</h2>
+<p>SSIDが違っていても、同じLANネットワークにつながっていれば、来客端末から家庭内のNAS、プリンター、管理画面が見えてしまうことがあります。</p>
+<p>「Wi‑Fi名が違う = 完全に分離されている」ではないところが、最初に少し分かりにくいポイントです。</p>
+<table><thead><tr><th>要素</th><th>役割</th></tr></thead><tbody><tr><td>SSID</td><td>来客が接続するWi-Fi名</td></tr><tr><td>独立したネットワーク</td><td>Guest用のIPアドレス範囲（例: 192.168.2.0/24）</td></tr><tr><td>firewall zone</td><td>GuestからLANへの通信を遮断する</td></tr></tbody></table>
+<p>つまり、Guest Wi‑Fiは「SSIDだけ」ではなく、「IPアドレス範囲」と「通信ルール」まで分けて初めて意味が出てきます。</p>
+<p>OpenWrt系では、Guest Wi‑Fiを作る時に「SSID」「ネットワーク」「firewall zone」を別々に設定します。</p>
+<p>最初は少し複雑に見えますが、役割を分けているぶん、あとから整理しやすいのが特徴です。</p>
+<h3>ステップ1: Guestネットワーク（インターフェース）を作る</h3>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> を開く</li><li><strong>Add new interface</strong> をクリック</li><li>以下を設定:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>Name</td><td><code>guest</code></td></tr><tr><td>Protocol</td><td><code>Static address</code></td></tr><tr><td>Device</td><td>なし（後でSSIDと紐付け）</td></tr></tbody></table>
+<ol><li><strong>Create interface</strong> をクリック</li><li><strong>General Settings</strong> タブ:</li></ol>
+<ul><li>IPv4 address: <code>192.168.2.1</code></li><li>IPv4 netmask: <code>255.255.255.0</code></li></ul>
+<ol><li><strong>DHCP Server</strong> タブ → <strong>Setup DHCP Server</strong> をクリック:</li></ol>
+<ul><li>Start: <code>100</code></li><li>Limit: <code>50</code></li><li>Leasetime: <code>1h</code></li></ul>
+<ol><li><strong>Save</strong> をクリック</li></ol>
+<p>ここで作っているのは、Guest端末専用のIPアドレス空間です。</p>
+<p>家庭LANとは別の <code>192.168.2.x</code> を使うことで、あとから firewall で分離しやすくなります。</p>
+<h3>ステップ2: Guest用SSIDを作る</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> を開く</li><li>任意の帯域（例: 5GHz <code>wifi1</code>）の <strong>Add</strong> をクリック</li><li><strong>Interface Configuration</strong> タブ:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>ESSID</td><td><code>Guest</code> または <code>MyHome_Guest</code></td></tr><tr><td>Mode</td><td><code>Access Point</code></td></tr><tr><td>Network</td><td><code>guest</code>（ステップ1で作成したネットワーク）</td></tr></tbody></table>
+<ol><li><strong>Wireless Security</strong> タブ:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>Encryption</td><td><code>WPA2-PSK</code></td></tr><tr><td>Key</td><td>来客用パスワード（家族用SSIDとは別にする）</td></tr></tbody></table>
+<ol><li><strong>Save</strong> をクリック</li></ol>
+<p>Guest用SSIDは、家族用SSIDと完全に同じにしないほうが分かりやすいです。</p>
+<p>「Guest」「MyHome_Guest」のように、来客側でも見分けやすい名前にしておくと運用しやすくなります。</p>
+<h3>ステップ3: firewall zoneを設定する</h3>
+<p>ここがGuest Wi‑Fiの“分離”を実際に行う部分です。</p>
+<p>SSIDだけ分けても、firewall zone を分けなければLANへ到達できてしまうことがあります。</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> を開く</li><li><strong>Zones</strong> タブで <strong>Add</strong> をクリック</li><li><strong>General Settings</strong> タブ:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>Name</td><td><code>guest</code></td></tr><tr><td>Input</td><td><code>REJECT</code></td></tr><tr><td>Output</td><td><code>ACCEPT</code></td></tr><tr><td>Forward</td><td><code>REJECT</code></td></tr><tr><td>Covered networks</td><td><code>guest</code></td></tr></tbody></table>
+<ol><li><strong>Inter-Zone Forwarding</strong> セクション:</li></ol>
+<ul><li><strong>Allow forward to destination zones</strong>: <code>wan</code> にチェック</li><li><strong>Allow forward from source zones</strong>: （空白のまま）</li></ul>
+<ol><li><strong>Save &amp; Apply</strong> をクリック</li></ol>
+<p>この設定では、「Guest → インターネット」は許可し、「Guest → LAN」は許可しない構成になります。</p>
+<h3>ステップ4: GuestからLANへのアクセスを確実に遮断する</h3>
+<p>デフォルトのfirewall設定では通常GuestゾーンからLANへの転送は拒否されますが、明示的なルールを追加しておくと、あとから設定を見返した時にも分かりやすくなります。</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Traffic Rules</strong> タブを開く</li><li><strong>Add</strong> をクリック</li><li>以下を設定:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>Name</td><td><code>Block Guest to LAN</code></td></tr><tr><td>Protocol</td><td><code>any</code></td></tr><tr><td>Source zone</td><td><code>guest</code></td></tr><tr><td>Destination zone</td><td><code>lan</code></td></tr><tr><td>Action</td><td><code>REJECT</code></td></tr></tbody></table>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<h3>ステップ5: GuestからルーターのLuCIへのアクセスを遮断する</h3>
+<p>Guest端末がルーターの管理画面（192.168.1.1）にアクセスできないようにします。</p>
+<p>家庭用途でも、ここを分けておくと「来客に管理画面を見せない」状態を作りやすくなります。</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Traffic Rules</strong> タブを開く</li><li><strong>Add</strong> をクリック</li><li>以下を設定:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定値</th></tr></thead><tbody><tr><td>Name</td><td><code>Block Guest to Router Admin</code></td></tr><tr><td>Protocol</td><td><code>TCP</code></td></tr><tr><td>Source zone</td><td><code>guest</code></td></tr><tr><td>Destination address</td><td><code>192.168.1.1</code></td></tr><tr><td>Destination port</td><td><code>443, 80</code></td></tr><tr><td>Action</td><td><code>REJECT</code></td></tr></tbody></table>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<h2>設定後の確認方法</h2>
+<p>設定が終わったら、必ず実際の端末で確認します。</p>
+<p>「設定を入れた」だけで終わらず、「本当に分離できているか」を確認するところまでがGuest Wi‑Fi設定です。</p>
+<p>以下を必ず確認します:</p>
+<p><strong>1. Guest端末からインターネットにつながるか</strong></p>
+<ul><li>Guest SSIDに接続して、ブラウザで任意のWebサイトを開く</li></ul>
+<p><strong>2. Guest端末からLAN内の機器が見えないか</strong></p>
+<ul><li>Guest SSIDに接続した状態で、<code>192.168.1.1</code>（ルーター）にアクセスしてみる → 接続できないことを確認</li><li>NASやプリンターのIPアドレスへアクセスしてみる → 接続できないことを確認</li></ul>
+<p><strong>3. Guest端末がDHCPでIPアドレスを取得できているか</strong></p>
+<ul><li>Guest端末のWi-Fi設定で、IPアドレスが <code>192.168.2.x</code> になっていることを確認</li></ul>
+<h2>CLIで状態を確認する</h2>
+<pre><code class="language-sh">echo &quot;### Guest DHCP leases&quot;
+cat /tmp/dhcp.leases
+
+echo &quot;### Guest network config&quot;
+uci show network.guest
+
+echo &quot;### Guest DHCP config&quot;
+uci show dhcp.guest
+
+echo &quot;### Guest firewall hints&quot;
+uci show firewall | grep -E &quot;guest|Allow-Guest|Block Guest&quot;
+
+echo &quot;### Guest interface addresses&quot;
+ip addr show | grep -A4 -E &#x27;br-guest|guest&#x27;
+
+echo &quot;### dnsmasq logs&quot;
+logread | grep -i dnsmasq | grep guest | tail -n 30</code></pre>
+<p><code>uci show network.guest</code> と <code>uci show firewall</code> は、Guestネットワークがどこへ紐付いているかを確認する時に便利です。</p>
+<p>最初はCLIで変更するより、「今どう設定されているか」を見る用途で使うくらいで十分です。</p>
+<h2>設定変更前のバックアップ</h2>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/guest-before-change-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>Guest Wi‑Fi設定は、network / wireless / firewall の3つへ同時に変更が入ります。変更前バックアップを残しておくと、設定を戻したい時にかなり安心です。</p>
+<h2>よくある失敗と対処</h2>
+<p>その前に、次の3つが確認できれば大枠では成功しています。最初はここまで確認できれば十分です。</p>
+<ul><li>Guest 端末が <code>192.168.2.x</code> のIPアドレスを取得している</li><li>Guest 端末からインターネットへ出られる</li><li>Guest 端末から NAS、プリンター、管理画面へ直接届かない</li></ul>
+<h3>Guest端末がIPアドレスを取得できない</h3>
+<p><strong>原因:</strong> DHCPサーバーがGuestインターフェースで動いていない <strong>対処:</strong> <code>Network &gt; Interfaces &gt; guest &gt; Edit &gt; DHCP Server</code> タブで「Setup DHCP Server」をクリックし、DHCPを有効化する</p>
+<h3>Guestからインターネットへ出られない</h3>
+<p><strong>原因:</strong> firewall zoneの設定でWANへの転送が許可されていない <strong>対処:</strong> <code>Network &gt; Firewall &gt; Zones</code> でguestゾーンの「Allow forward to destination zones」に <code>wan</code> が含まれているか確認する</p>
+<h3>Guestから管理画面にアクセスできてしまう</h3>
+<p><strong>原因:</strong> firewall ruleの設定が不足している <strong>対処:</strong> 上記ステップ5の「Block Guest to Router Admin」ルールを追加する</p>
+<h3>変更後にLANからLuCIにアクセスできなくなった</h3>
+<p>firewall設定を触ると、意図せず自分自身の管理アクセスまで止めてしまうことがあります。</p>
+<p>最初は有線LANを1本つないだ状態で作業すると、復旧しやすくなります。</p>
+<ol><li>有線でLANポートに接続する</li><li>バックアップから設定を復元する: <code>cp /etc/config/firewall.backup.YYYYMMDD /etc/config/firewall &amp;&amp; /etc/init.d/firewall restart</code></li></ol>
+<h2>UCIで設定する方法（上級者向け）</h2>
+<p>Guest Wi‑FiはCLIでも設定できますが、最初はLuCIから作るほうが安全です。</p>
+<p>UCIで設定する場合も、まず <code>uci show network</code> や <code>uci show firewall</code> で現在設定を確認してから変更することをおすすめします。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/guest-uci-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+for cfg in network dhcp firewall wireless; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+# Guestネットワーク追加
+uci set network.guest=interface
+uci set network.guest.proto=&#x27;static&#x27;
+uci set network.guest.ipaddr=&#x27;192.168.2.1&#x27;
+uci set network.guest.netmask=&#x27;255.255.255.0&#x27;
+uci changes network
+uci commit network
+
+# DHCPサーバー追加
+uci set dhcp.guest=dhcp
+uci set dhcp.guest.interface=&#x27;guest&#x27;
+uci set dhcp.guest.start=&#x27;100&#x27;
+uci set dhcp.guest.limit=&#x27;50&#x27;
+uci set dhcp.guest.leasetime=&#x27;1h&#x27;
+uci changes dhcp
+uci commit dhcp
+
+# firewall zone追加
+uci add firewall zone
+uci set firewall.@zone[-1].name=&#x27;guest&#x27;
+uci set firewall.@zone[-1].input=&#x27;REJECT&#x27;
+uci set firewall.@zone[-1].output=&#x27;ACCEPT&#x27;
+uci set firewall.@zone[-1].forward=&#x27;REJECT&#x27;
+uci add_list firewall.@zone[-1].network=&#x27;guest&#x27;
+
+# GuestからWANへの転送を許可
+uci add firewall forwarding
+uci set firewall.@forwarding[-1].src=&#x27;guest&#x27;
+uci set firewall.@forwarding[-1].dest=&#x27;wan&#x27;
+
+# Guest端末がIPアドレスを取得できるようDHCPを許可
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;Allow-Guest-DHCP&#x27;
+uci set firewall.@rule[-1].src=&#x27;guest&#x27;
+uci set firewall.@rule[-1].proto=&#x27;udp&#x27;
+uci set firewall.@rule[-1].dest_port=&#x27;67-68&#x27;
+uci set firewall.@rule[-1].target=&#x27;ACCEPT&#x27;
+
+# Guest端末がルーターのDNSを使えるようDNSを許可
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;Allow-Guest-DNS&#x27;
+uci set firewall.@rule[-1].src=&#x27;guest&#x27;
+uci set firewall.@rule[-1].proto=&#x27;tcpudp&#x27;
+uci set firewall.@rule[-1].dest_port=&#x27;53&#x27;
+uci set firewall.@rule[-1].target=&#x27;ACCEPT&#x27;
+
+uci changes firewall
+uci commit firewall
+
+# サービスを再起動
+/etc/init.d/network restart
+/etc/init.d/dnsmasq restart
+/etc/init.d/firewall restart</code></pre>
+<p>反映後はGuest端末を接続し、<code>cat /tmp/dhcp.leases</code>、<code>uci show firewall | grep guest</code>、Guest端末からのWeb閲覧、Guest端末から <code>https://192.168.1.1</code> へ届かないことを確認します。</p>
+<h2>家庭と店舗での使い分け</h2>
+<p>Guest Wi‑Fiは、家庭でも店舗でも「端末を混ぜない」ためにかなり役立ちます。</p>
+<p>特に最近は、スマートフォン、IoT、ゲーム機、防犯カメラなど、接続機器が増えているため、最初から分けておくほうが管理しやすくなります。</p>
+<p><strong>家庭:</strong></p>
+<ul><li>友人・親戚の来客用</li><li>子どもの友人のゲーム機・スマートフォン</li><li>一時的な作業業者へのWi-Fi提供</li><li>パスワードを定期的に変えて渡す運用が向く</li></ul>
+<p><strong>店舗:</strong></p>
+<ul><li>来客へのフリーWi-Fi提供</li><li>スタッフ用SSIDとは必ず分ける</li><li>POSや決済端末は別ネットワークに置く</li><li>業務PCや防犯カメラへのアクセスを遮断する</li></ul>
+<h2>まとめ</h2>
+<p>ゲストWi‑Fiの作成は、次の3つをセットで考えると整理しやすいです:</p>
+<ol><li><strong>独立したネットワーク作成</strong>: Guest用のIPアドレス範囲（192.168.2.0/24）</li><li><strong>Guest用SSID作成</strong>: Guestネットワークへ紐付け</li><li><strong>firewall zone設定</strong>: Guest→LAN通信を遮断し、Guest→WAN通信のみ許可</li></ol>
+<p>設定後は必ずGuest端末から実際に確認します。インターネットへ出られること、LAN内の機器へアクセスできないことの両方を確認して初めて、分離が機能したと言えます。</p>
+<p>最初から細かい制御を増やすより、「GuestをLANへ入れない」という基本分離を確実に作るほうが重要です。</p>
+<figure><img src="/blog/openwrt/assets/007/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>ゲストWi-FiはSSIDを分けるだけで十分？</h3>
+<p>十分ではありません。Guest用のネットワークと firewall zone も分けて、LANへの通信を止める必要があります。</p>
+<h3>ゲストWi-Fiからルーター管理画面は見えないようにできる？</h3>
+<p>できます。Traffic Ruleで Guest から <code>192.168.1.1</code> へのアクセスを拒否する設定を入れると分かりやすいです。</p>
+<h3>家庭でもゲストWi-Fiは作ったほうがいい？</h3>
+<p>来客があるなら作っておく価値があります。</p>
+<p>家庭内機器と来客端末を分けるだけでも、かなり整理しやすくなります。IoT機器が増えている家庭ほど、Guest分離のメリットが出やすいです。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT WiFi settings: https://support.linksys.com/kb/article/221-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n284bb49cd1e3">家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】</a></p></blockquote>
+<h1>家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>家族向けフィルタリングの第一歩は、「強く制限する」ことではなく、「端末を分類する」ことです。</p>
+<p>家族用、子ども用、IoT用、来客用でネットワークを分けると、DNS設定や firewall rules を端末グループごとに適用しやすくなります。</p>
+<p>LN6001-JPはOpenWrtベースなので、SSID、DHCP、DNS、firewall zone を組み合わせた設計を作れます。</p>
+<p>ただし、最初から細かな制限ルールを大量に作る必要はありません。まずは「Kids用SSIDを分ける」「KidsだけフィルタリングDNSを使う」くらいでも、家庭内ネットワークはかなり整理しやすくなります。</p>
+<p>この記事では、家庭向けの現実的なネットワーク分離として、Kids、IoT、Guestをどう分けると扱いやすいかを順番に見ていきます。</p>
+<figure><img src="/blog/openwrt/assets/010/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>家族用、子ども用、IoT用でネットワークを分ける考え方</li><li>フィルタリングDNSをどう配ると整理しやすいか</li><li>firewall zone を使った基本的な分離方法</li><li>ルーター側でできることと、端末側に任せるべきこと</li></ul>
+<h2>こんな家庭に向いています</h2>
+<ul><li>子ども用タブレットやゲーム機だけ、少し強めに見守りたい</li><li>スマート家電やカメラを、家族のPCやNASと分けておきたい</li><li>来客用Wi-Fiも含めて、家庭内ネットワークを整理したい</li></ul>
+<figure><img src="/blog/openwrt/assets/010/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>最初から全部を細かく作り込む必要はありません。むしろ、最初はシンプルな分類だけのほうが運用しやすくなります。</p>
+<p>まずは次の3つだけできれば、家庭向けの整理としては十分に効果があります。</p>
+<ol><li>Kids用のネットワークとSSIDを分ける</li><li>KidsへフィルタリングDNSを配る</li><li>IoTは必要になった時に追加する</li></ol>
+<p>最初の一歩としては、「子ども用だけ分ける」で十分です。GuestやIoTはあとから足しても遅くありません。</p>
+<p>ネットワーク分離は、“最初から完璧に制御する” より、“混ぜない” ところから始めるほうが整理しやすいです。</p>
+<h2>設定前に現在の状態を控える</h2>
+<p>Kids、IoT、Guestを分ける設定では、<code>network</code>、<code>wireless</code>、<code>firewall</code>、<code>dhcp</code> をまとめて触ります。まずは現在の状態を保存してから進めます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/family-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot;
+ip addr show &gt; &quot;$BACKUP_DIR/ip-addr.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>Wi-Fiパスワードや端末情報が含まれるため、このバックアップをそのまま共有しないようにします。</p>
+<h2>端末グループの分類から始める</h2>
+<p>最初に考えるのは、細かな制限内容よりも「どの端末をどこへ置くか」です。</p>
+<p>先に分類を決めておくと、あとからDNSやfirewallルールを整理しやすくなります。</p>
+<table><thead><tr><th>グループ</th><th>端末例</th><th>目的</th></tr></thead><tbody><tr><td>親/大人</td><td>PC・スマートフォン</td><td>制限なし、通常LAN</td></tr><tr><td>子ども</td><td>タブレット・ゲーム機</td><td>フィルタリングDNS、時間制限（端末側）</td></tr><tr><td>IoT</td><td>スマート家電・カメラ・スピーカー</td><td>LAN内通信を制限</td></tr><tr><td>来客</td><td>友人の端末</td><td>インターネットのみ</td></tr></tbody></table>
+<p>家庭では、「親用LANに全部入れる」状態から始まりがちですが、子ども用端末やIoT機器だけでも分けておくと、トラブルや管理がかなり整理しやすくなります。</p>
+<h2>ネットワーク設計の全体像</h2>
+<table><thead><tr><th>ネットワーク</th><th>IPアドレス範囲</th><th>SSID例</th><th>DNS</th></tr></thead><tbody><tr><td>LAN（親用）</td><td>192.168.1.0/24</td><td><code>MyHome</code></td><td>通常DNS</td></tr><tr><td>Kids</td><td>192.168.3.0/24</td><td><code>MyHome_Kids</code></td><td>フィルタリングDNS</td></tr><tr><td>IoT</td><td>192.168.4.0/24</td><td><code>MyHome_IoT</code></td><td>通常DNS（または制限DNS）</td></tr><tr><td>Guest</td><td>192.168.2.0/24</td><td><code>MyHome_Guest</code></td><td>通常DNS</td></tr></tbody></table>
+<p>全部を最初から作る必要はありません。</p>
+<p>まずは <code>LAN + Kids</code> の2系統だけでも十分意味があります。IoTやGuestは、必要になった時にあとから追加していくほうが無理がありません。</p>
+<p>家庭でのざっくりした置き方の例:</p>
+<ul><li>親のスマートフォン、PC、NAS は LAN</li><li>子どものタブレット、ゲーム機は Kids</li><li>テレビ、見守りカメラ、スマートスピーカーは IoT</li><li>友人や親族の端末は Guest</li></ul>
+<h2>子ども用ネットワークの作り方</h2>
+<p>Kids用ネットワークでは、「別SSIDを作る」だけでなく、「別IPアドレス帯」と「別firewall zone」を作るところまで行うと、あとから管理しやすくなります。</p>
+<h3>ステップ1: Kidsネットワークを作る</h3>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong></li><li>Name: <code>kids</code>、Protocol: <code>Static address</code></li><li><strong>General Settings</strong> タブ:</li></ol>
+<ul><li>IPv4 address: <code>192.168.3.1</code></li><li>IPv4 netmask: <code>255.255.255.0</code></li></ul>
+<ol><li><strong>DHCP Server</strong> タブ → <strong>Setup DHCP Server</strong>:</li></ol>
+<ul><li>Start: <code>100</code>、Limit: <code>50</code>、Leasetime: <code>2h</code></li></ul>
+<ol><li><strong>DHCP Server</strong> → <strong>Advanced Settings</strong> タブ:</li></ol>
+<ul><li><strong>DHCP-Options</strong>: <code>6,1.1.1.3,1.0.0.3</code>（Cloudflare Family DNSを配布）</li></ul>
+<ol><li><strong>Save</strong></li></ol>
+<p>ここで作っているのは、Kids端末専用のIPアドレス空間です。</p>
+<p>親用LANと別の <code>192.168.3.x</code> を使うことで、あとから通信ルールを整理しやすくなります。</p>
+<h3>ステップ2: Kids用SSIDを作る</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 任意帯域の <strong>Add</strong></li><li>ESSID: <code>MyHome_Kids</code></li><li>Network: <code>kids</code>（作成したネットワーク）</li><li>Encryption: <code>WPA2-PSK</code>、Key: 子ども用パスワード</li><li><strong>Save</strong> → <strong>Apply</strong></li></ol>
+<p>Kids用SSIDは、家族用SSIDと完全に同じ名前にしないほうが管理しやすいです。</p>
+<p>「MyHome_Kids」のように、親側から見ても分かりやすい名前にしておくと整理しやすくなります。</p>
+<h3>ステップ3: firewall zoneを設定する</h3>
+<p>ここが「KidsネットワークをLANから分ける」部分です。</p>
+<p>SSIDだけ分けても、firewall zone を分けなければLANへそのまま届いてしまうことがあります。</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Zones</strong> → <strong>Add</strong></li><li>Name: <code>kids</code>、Input: <code>REJECT</code>、Output: <code>ACCEPT</code>、Forward: <code>REJECT</code></li><li>Covered networks: <code>kids</code></li><li>Allow forward to destination zones: <code>wan</code>（インターネットへの接続を許可）</li></ol>
+<p>この設定では、「Kids → インターネット」は許可し、「Kids → LAN」は許可しない構成になります。</p>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<h3>UCIコマンドで設定する場合</h3>
+<p>KidsネットワークはCLIでも設定できますが、最初はLuCIから設定したほうが構成を理解しやすいです。</p>
+<p>UCIを使う場合も、まず <code>uci show network</code> や <code>uci show firewall</code> で現在設定を確認してから変更するほうが安全です。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/kids-before-uci-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+for cfg in network dhcp firewall wireless; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+# Kidsネットワーク
+uci set network.kids=interface
+uci set network.kids.proto=&#x27;static&#x27;
+uci set network.kids.ipaddr=&#x27;192.168.3.1&#x27;
+uci set network.kids.netmask=&#x27;255.255.255.0&#x27;
+uci changes network
+uci commit network
+
+# KidsDHCP（Cloudflare Family DNSを配布）
+uci set dhcp.kids=dhcp
+uci set dhcp.kids.interface=&#x27;kids&#x27;
+uci set dhcp.kids.start=&#x27;100&#x27;
+uci set dhcp.kids.limit=&#x27;50&#x27;
+uci set dhcp.kids.leasetime=&#x27;2h&#x27;
+uci add_list dhcp.kids.dhcp_option=&#x27;6,1.1.1.3,1.0.0.3&#x27;
+uci changes dhcp
+uci commit dhcp
+
+# Kidsファイアウォールゾーン
+uci add firewall zone
+uci set firewall.@zone[-1].name=&#x27;kids&#x27;
+uci set firewall.@zone[-1].input=&#x27;REJECT&#x27;
+uci set firewall.@zone[-1].output=&#x27;ACCEPT&#x27;
+uci set firewall.@zone[-1].forward=&#x27;REJECT&#x27;
+uci add_list firewall.@zone[-1].network=&#x27;kids&#x27;
+
+uci add firewall forwarding
+uci set firewall.@forwarding[-1].src=&#x27;kids&#x27;
+uci set firewall.@forwarding[-1].dest=&#x27;wan&#x27;
+
+# Kids端末がIPアドレスを取得できるようDHCPを許可
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;Allow-Kids-DHCP&#x27;
+uci set firewall.@rule[-1].src=&#x27;kids&#x27;
+uci set firewall.@rule[-1].proto=&#x27;udp&#x27;
+uci set firewall.@rule[-1].dest_port=&#x27;67-68&#x27;
+uci set firewall.@rule[-1].target=&#x27;ACCEPT&#x27;
+
+# Kids端末が指定DNSを使えるようDNSを許可
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;Allow-Kids-DNS&#x27;
+uci set firewall.@rule[-1].src=&#x27;kids&#x27;
+uci set firewall.@rule[-1].proto=&#x27;tcpudp&#x27;
+uci set firewall.@rule[-1].dest_port=&#x27;53&#x27;
+uci set firewall.@rule[-1].target=&#x27;ACCEPT&#x27;
+
+uci changes firewall
+uci commit firewall
+/etc/init.d/network restart
+/etc/init.d/dnsmasq restart
+/etc/init.d/firewall restart</code></pre>
+<h2>IoT用ネットワークの作り方</h2>
+<p>IoT機器は、家庭内LANのNASやPCにアクセスする必要がないものが多いため、独立したネットワークへ分けてLAN通信を制限します。</p>
+<p>特に見守りカメラやスマート家電は、最初からIoT用へまとめておくと整理しやすくなります。</p>
+<h3>IoTネットワーク設定</h3>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong></li><li>Name: <code>iot</code>、Protocol: <code>Static address</code></li><li>IPv4 address: <code>192.168.4.1</code>、Netmask: <code>255.255.255.0</code></li><li>DHCPサーバーを設定（Leasetime: <code>12h</code>）</li><li><strong>Save</strong></li></ol>
+<h3>IoT用SSIDを作る</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 2.4GHz帯の <strong>Add</strong></li><li>ESSID: <code>MyHome_IoT</code></li><li>Network: <code>iot</code></li><li>Encryption: <code>WPA2-PSK</code></li><li><strong>Save</strong> → <strong>Apply</strong></li></ol>
+<p>IoT機器は2.4GHz帯しか対応していないことも多いため、IoT用SSIDは2.4GHz側で作るとつながりやすい場合があります。</p>
+<h3>IoT用firewallゾーン（LAN通信を制限）</h3>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Zones</strong> → <strong>Add</strong></li><li>Name: <code>iot</code>、Input: <code>REJECT</code>、Output: <code>ACCEPT</code>、Forward: <code>REJECT</code></li><li>Covered networks: <code>iot</code></li><li>Allow forward to destination zones: <code>wan</code>（クラウド通信のみ許可）</li><li><strong>Save &amp; Apply</strong></li></ol>
+<h3>IoTからLANへの通信を明示的に遮断</h3>
+<pre><code class="language-sh">echo &quot;### backup firewall config&quot;
+cp /etc/config/firewall /etc/config/firewall.backup.$(date +%Y%m%d-%H%M)
+
+echo &quot;### block IoT to LAN&quot;
+uci add firewall rule
+uci set firewall.@rule[-1].name=&#x27;Block IoT to LAN&#x27;
+uci set firewall.@rule[-1].src=&#x27;iot&#x27;
+uci set firewall.@rule[-1].dest=&#x27;lan&#x27;
+uci set firewall.@rule[-1].target=&#x27;REJECT&#x27;
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart</code></pre>
+<p>IoT機器はクラウド通信だけ必要なケースも多いため、「IoT → WANだけ許可」という構成にすると整理しやすくなります。</p>
+<h2>DHCP予約で端末を固定する</h2>
+<p>特定の端末（NAS・プリンター・カメラなど）へ固定IPアドレスを割り当てます。</p>
+<p>端末が増えてくると、「毎回IPが変わる」状態より、重要機器だけ固定しておいたほうが管理しやすくなります。</p>
+<h3>LuCIでの設定手順</h3>
+<ol><li><strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Static Leases</strong> タブを開く</li><li><strong>Add</strong> をクリック</li><li>以下を入力:</li></ol>
+<ul><li>Hostname: 端末の名前（例: <code>nas-1</code>）</li><li>MAC address: 端末のMACアドレス（Wi-Fi設定やルーターのDHCPリストから確認）</li><li>IP address: 割り当てたい固定IP（例: <code>192.168.1.100</code>）</li></ul>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<p>端末のMACアドレスは <code>cat /tmp/dhcp.leases</code> で確認できます（現在接続中の端末一覧）。</p>
+<p>固定IPを付ける時は、ネットワークごとにアドレス範囲を整理しておくと、あとから見返した時にも分かりやすくなります。</p>
+<h2>フィルタリングDNSの選択肢</h2>
+<table><thead><tr><th>サービス</th><th>DNS1</th><th>DNS2</th><th>特徴</th></tr></thead><tbody><tr><td>Cloudflare Family</td><td><code>1.1.1.3</code></td><td><code>1.0.0.3</code></td><td>マルウェア・成人向けコンテンツをフィルタ</td></tr><tr><td>Cloudflare Malware</td><td><code>1.1.1.2</code></td><td><code>1.0.0.2</code></td><td>マルウェアのみフィルタ</td></tr><tr><td>Google SafeSearch</td><td><code>8.8.8.8</code></td><td><code>8.8.4.4</code></td><td>SafeSearch強制（Googleのみ）</td></tr><tr><td>OpenDNS Family</td><td><code>208.67.222.123</code></td><td><code>208.67.220.123</code></td><td>細かいカテゴリ設定が可能</td></tr></tbody></table>
+<p>最初は Cloudflare Family DNS くらいから試すと入りやすいです。</p>
+<p>フィルタリング精度や誤判定はサービスごとに違うため、「どれが絶対によい」というより、家庭に合うものを試しながら決めるほうが現実的です。</p>
+<h2>DNSだけでできること、できないこと</h2>
+<p>DNSフィルタリングで制御できるのは、名前解決が中心です。</p>
+<p>期待しすぎないために、「DNSでできること」と「端末側でやるべきこと」を分けて考えると整理しやすくなります。</p>
+<table><thead><tr><th>項目</th><th>DNSフィルタリングでできる？</th><th>補足</th></tr></thead><tbody><tr><td>危険サイトや成人向けサイトの入口を減らす</td><td>できる</td><td>フィルタリングDNSが得意な領域</td></tr><tr><td>子ども用端末に別DNSを配る</td><td>できる</td><td>DHCP で Kids 用に配り分けできる</td></tr><tr><td>利用時間の制限</td><td>できないことが多い</td><td>端末側の機能や別の制御が必要</td></tr><tr><td>アプリ単位の制御</td><td>難しい</td><td>アプリ内通信や直接IP通信はDNSを通らないことがある</td></tr><tr><td>DoH での回避を完全に防ぐ</td><td>難しい</td><td>端末側設定も影響する</td></tr><tr><td>YouTubeやSNSを細かく制限する</td><td>難しい</td><td>同じドメイン配下に複数用途が混在しやすい</td></tr></tbody></table>
+<p>つまり、DNSフィルタリングは「全部を制御する機能」というより、「危険サイトや不要な入口を減らす仕組み」と考えるほうが分かりやすいです。</p>
+<p>子ども用端末の管理は、ルーター側のネットワーク分離とDNSフィルタリングに加えて、端末側のペアレンタルコントロール機能や家庭内ルールを組み合わせるのが現実的です。</p>
+<p>ルーターだけで全部を制御しようとすると複雑になりやすいため、「ルーター側は入口整理、細かな利用制限は端末側」と分けると運用しやすくなります。</p>
+<h2>設定後の確認方法</h2>
+<p>まずは次の3つが確認できれば、設定は大きく外していません。最初はここまで確認できれば十分です。</p>
+<pre><code class="language-sh">echo &quot;### DHCP leases&quot;
+cat /tmp/dhcp.leases
+
+echo &quot;### kids/iot interfaces&quot;
+uci show network.kids 2&gt;/dev/null || true
+uci show network.iot 2&gt;/dev/null || true
+ip addr show | grep -A4 -E &#x27;br-kids|kids|br-iot|iot&#x27;
+
+echo &quot;### DHCP DNS options&quot;
+uci show dhcp | grep -E &#x27;kids|iot|dhcp_option&#x27;
+
+echo &quot;### firewall family zones&quot;
+uci show firewall | grep -E &#x27;kids|iot|guest|Allow-Kids|Block IoT&#x27;
+
+echo &quot;### DHCP logs&quot;
+logread | grep -i dnsmasq | tail -n 80</code></pre>
+<p><code>cat /tmp/dhcp.leases</code> は、どの端末がどのネットワークへ入っているかを見る時にかなり便利です。</p>
+<p>CLIは、最初は設定変更より「今どうつながっているか」を確認する用途で使うくらいで十分です。</p>
+<h2>まとめ</h2>
+<p>家族向けネットワーク分離は、次の順番で考えると整理しやすいです:</p>
+<ol><li>子ども用・IoT用ネットワーク（インターフェース）を作成</li><li>それぞれのSSIDを作成してネットワークに紐付け</li><li>firewall zoneを設定してLAN間通信を制限</li><li>子ども用にはDHCPでフィルタリングDNSを配布</li><li>重要な機器はDHCP予約で固定IPを割り当て</li></ol>
+<p>制限より分類を先に行うことで、各グループに適したDNSとfirewall設定を整理しやすくなります。</p>
+<p>端末の制御は端末側のペアレンタルコントロール機能と組み合わせると、ルーター側設定を過度に複雑にせずに済みます。</p>
+<p>最初から完璧な制限を目指すより、「Kidsだけ分ける」「IoTだけ分ける」くらいから始めるほうが、家庭では運用しやすいです。</p>
+<figure><img src="/blog/openwrt/assets/010/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>子ども用Wi-FiのフィルタリングはDNSだけで十分？</h3>
+<p>十分ではありません。</p>
+<p>DNSは入口の整理には役立ちますが、利用時間の制限やアプリごとの制御は端末側機能も組み合わせるほうが現実的です。</p>
+<h3>スマート家電やカメラは家族用Wi-Fiと分けたほうがいい？</h3>
+<p>分けたほうが管理しやすいです。IoT機器はLAN内のPCやNASへ触れさせない設計にすると整理しやすくなります。</p>
+<h3>家庭のWi-Fiは最初からKids用とIoT用に分けるべき？</h3>
+<p>最初はKidsとIoTを分けるくらいでも十分です。</p>
+<p>必要になってからGuestや細かな制御を足すほうが無理がありません。最初から複雑にしすぎないほうが、家庭では運用しやすくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Cloudflare Family DNS: https://1.1.1.1/family/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

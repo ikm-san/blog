@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ハードウェア概要: LN6001-JPのポート・LED・ボタンの見方【OpenWrt集中連載026】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/nf5e2df270ea3">ハードウェア概要: LN6001-JPのポート・LED・ボタンの見方【OpenWrt集中連載026】</a></p></blockquote>
+<h1>ハードウェア概要: LN6001-JPのポート・LED・ボタンの見方【OpenWrt集中連載026】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JP（Linksys Velop WRT Pro 7）は、Wi‑Fi 7（802.11be）対応のOpenWrtベース無線ルーターです。</p>
+<p>2.4GHz / 5GHz / 6GHz のトライバンドとMLOに対応し、LuCIやSSHを使った高度な設定もできます。</p>
+<p>ただし、最初から細かな仕様を全部覚えなくても大丈夫です。</p>
+<p>まずは「WANポート」「LANポート」「LED状態」「リセットボタン」の4つだけ分かれば、初期設定やトラブル切り分けはかなり進めやすくなります。</p>
+<p>この記事では、LN6001-JP本体まわりの見方、各ポートやLEDの意味、最初に確認したいポイントを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/026/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JPのWAN、LAN、LED、リセットボタンの役割</li><li>初期設定前に確認したい本体まわり</li><li>LED表示からどこまで切り分けできるか</li><li>2.5GbEやWi‑Fi 7の基本的な見方</li></ul>
+<p>最初は、「全部のスペックを理解する」より、「どこへ何をつなぐか」を把握するほうがかなり重要です。</p>
+<h2>主要スペック</h2>
+<table><thead><tr><th>項目</th><th>仕様</th></tr></thead><tbody><tr><td>Wi-Fi規格</td><td>Wi-Fi 7（IEEE 802.11be）</td></tr><tr><td>対応バンド</td><td>2.4GHz / 5GHz / 6GHz（トライバンド）</td></tr><tr><td>WANポート</td><td>2.5GbE × 1</td></tr><tr><td>LANポート</td><td>1GbE × 4</td></tr><tr><td>OS/ファームウェア</td><td>OpenWrtベース（Linksys独自ファームウェア）</td></tr><tr><td>管理画面</td><td>LuCI（https://192.168.1.1）</td></tr><tr><td>日本向けモデル</td><td>LN6001-JP（技適取得済み）</td></tr></tbody></table>
+<p>最初は、「WANは回線側」「LANは端末側」という切り分けだけでもかなり役立ちます。</p>
+<blockquote><p>詳細スペックはLinksys公式製品ページおよびサポートページ（https://support.linksys.com/kb/article/6274-jp/）をご確認ください。</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>実際の通信速度は、接続端末・距離・障害物・回線側構成でも変わります。</p></blockquote>
+<p>SSHで実機側の基本情報を見るなら、まずは読み取り専用の確認だけで十分です。</p>
+<pre><code class="language-sh">echo &quot;### system board&quot;
+ubus call system board
+
+echo &quot;### cpu&quot;
+cat /proc/cpuinfo | grep -E &#x27;system type|machine|model|processor|cpu MHz|BogoMIPS&#x27; | head -n 30
+
+echo &quot;### memory and storage&quot;
+free
+df -h
+
+echo &quot;### uptime&quot;
+uptime</code></pre>
+<p>この出力で、ファームウェアのベース情報、CPU、メモリ、ストレージ、稼働時間を確認できます。スペック表と完全に同じ言葉で表示されるとは限りませんが、トラブル相談時の基準情報として役に立ちます。</p>
+<figure><img src="/blog/openwrt/assets/026/hardware-map.png" alt="本体まわりの確認ポイント"></figure>
+<p>---</p>
+<p>ルーター初期設定時は、「WANとLANを逆に挿していた」だけのケースもかなり多くあります。</p>
+<figure><img src="/blog/openwrt/assets/026/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>ポートの配置と役割</h2>
+<h3>背面ポート（後ろから見て）</h3>
+<table><thead><tr><th>ポート</th><th>種別</th><th>役割</th></tr></thead><tbody><tr><td>WAN</td><td>2.5GbE（黄/青色ポート）</td><td>ONU・HGW・モデムと接続する入口</td></tr><tr><td>LAN 1〜4</td><td>1GbE × 4</td><td>PCや有線デバイスを接続するLANポート</td></tr><tr><td>DC IN</td><td>電源</td><td>付属ACアダプターを接続</td></tr></tbody></table>
+<h3>ポート接続のポイント</h3>
+<ul><li><strong>WANポートとLANポートを間違えない</strong>: WANポートはONU/HGWへ接続。LANポートはPCやスイッチへ接続</li><li><strong>2.5GbEのWANポート</strong>: ONU/HGWが2.5GbE対応の場合は2.5Gbpsで接続可能。未対応の場合は自動で1Gbpsにネゴシエート</li><li><strong>LANポート間の通信</strong>: LAN 1〜4のポート間はブリッジ接続でルーターを経由せずに通信</li></ul>
+<p>最初は「ONU/HGW → WAN」「PC → LAN」の向きだけ確認できれば十分です。</p>
+<p>SSHでポートやインターフェース名を確認する場合は、次のように読み取ります。</p>
+<pre><code class="language-sh">echo &quot;### interfaces&quot;
+ip link show
+
+echo &quot;### IPv4/IPv6 addresses&quot;
+ip addr show
+
+echo &quot;### bridge and VLAN related config&quot;
+uci show network | grep -E &#x27;device|bridge|ports|vlan|ifname|proto&#x27;</code></pre>
+<p>LN6001-JPの内部インターフェース名は、画面上の「WAN」「LAN 1」などのラベルと完全に同じ名前とは限りません。まずはLuCIの <strong>Network</strong> → <strong>Interfaces</strong> と合わせて読み、いきなり設定を書き換えないようにします。</p>
+<p>リンク速度を見たい場合は、環境によって取れる項目が変わります。取れるものだけ表示するには次のようにします。</p>
+<pre><code class="language-sh">for dev in /sys/class/net/*; do
+  name=&quot;$(basename &quot;$dev&quot;)&quot;
+  [ -r &quot;$dev/speed&quot; ] || continue
+  printf &quot;%s speed: &quot; &quot;$name&quot;
+  cat &quot;$dev/speed&quot; 2&gt;/dev/null || true
+done</code></pre>
+<p>ここで <code>2500</code> や <code>1000</code> のような値が見える場合があります。ただし、すべての仮想インターフェースや無線インターフェースで表示されるわけではありません。</p>
+<p>---</p>
+<p>LEDを見るだけでも、「起動中なのか」「回線問題なのか」をかなり切り分けしやすくなります。</p>
+<h2>LEDの見方</h2>
+<p>LN6001-JPは、本体上部に1つのステータスLEDがあります。</p>
+<table><thead><tr><th>LED状態</th><th>意味</th></tr></thead><tbody><tr><td>白点灯（常時）</td><td>正常動作中・インターネット接続中</td></tr><tr><td>赤点灯（常時）</td><td>インターネット接続なし（WAN未接続または設定エラー）</td></tr><tr><td>青点滅</td><td>起動中</td></tr><tr><td>消灯</td><td>電源オフ / LED無効化設定</td></tr></tbody></table>
+<p>最初は、「白=正常」「赤=回線問題系」「青点滅=起動中」くらいで覚えるだけでも十分役立ちます。</p>
+<p>LEDの状態と対処:</p>
+<ul><li><strong>赤点灯が続く</strong>: WANケーブル接続、ONU/HGW電源、回線種別設定を確認する（014の記事参照）</li><li><strong>起動後も青点滅が続く</strong>: 起動に時間がかかることがある（最大3分程度待つ）。それ以上続く場合はリセットや再起動を検討する</li></ul>
+<p>---</p>
+<p>リセットボタンは便利ですが、「最後の手段」として考えるほうが安全です。</p>
+<h2>リセットボタン</h2>
+<p>本体底面（または裏面）に<strong>リセットボタン</strong>があります。</p>
+<table><thead><tr><th>操作</th><th>方法</th><th>結果</th></tr></thead><tbody><tr><td>ファクトリーリセット</td><td>電源を入れた状態でリセットボタンを約10秒間押し続ける</td><td>全設定を初期化</td></tr></tbody></table>
+<p>リセット開始後はLEDが赤点灯から青点滅へ変わり、再起動後にインターネット接続を検知すると白点灯になります。</p>
+<p>最初は、LuCIやSSHで戻せないかを先に確認するほうが整理しやすくなります。</p>
+<p>---</p>
+<p>Wi‑Fi 7や6GHzは高速ですが、「距離が伸びれば常に最速」というわけではありません。</p>
+<h2>Wi-Fiアンテナ・電波の仕様</h2>
+<table><thead><tr><th>バンド</th><th>周波数帯</th><th>最大規格速度の目安</th><th>特徴</th></tr></thead><tbody><tr><td>2.4GHz（radio0）</td><td>2400〜2484MHz</td><td>〜591Mbps</td><td>障害物に強い・遠くまで届く</td></tr><tr><td>5GHz（radio1）</td><td>5150〜5850MHz</td><td>〜2883Mbps</td><td>速度と距離のバランスが良い</td></tr><tr><td>6GHz（radio2）</td><td>5925〜7125MHz</td><td>〜5765Mbps</td><td>最高速・干渉少ない・短距離向き</td></tr></tbody></table>
+<p>最初は、「2.4GHzは遠距離向き」「5GHzはバランス型」「6GHzは近距離高速」くらいで整理すると分かりやすくなります。</p>
+<p>---</p>
+<p>OpenWrt系では、「今どのバージョンを使っているか」を確認できるだけでもかなり重要です。</p>
+<h2>ファームウェアバージョンの確認</h2>
+<p>LuCIのホーム画面に表示されています。</p>
+<p>SSHでは次のように確認できます。</p>
+<pre><code class="language-sh">echo &quot;### firmware / release&quot;
+cat /etc/openwrt_release
+
+echo &quot;### system board&quot;
+ubus call system board
+
+echo &quot;### installed base packages&quot;
+opkg list-installed | grep -E &#x27;base-files|busybox|dnsmasq|firewall|dropbear|uhttpd&#x27;</code></pre>
+<p>記事やサポートへ相談する時は、機種名だけでなく、ファームウェアのバージョン、稼働時間、WAN構成も一緒に控えておくと話が早くなります。</p>
+<pre><code class="language-sh">echo &quot;### quick support bundle&quot;
+date
+ubus call system board
+uptime
+ifstatus wan
+ifstatus wan6
+ip route show
+ip -6 route show</code></pre>
+<p>---</p>
+<h2>まとめ</h2>
+<p>最初に覚えておきたいのは、「WANポートは回線機器側」「LANポートはPCやスイッチ側」という切り分けと、LEDの白・赤・青点滅で状態を見ることです。</p>
+<p>細かなスペックを全部暗記しなくても、この2点が分かっていれば初期設定や切り分けはかなり進めやすくなります。</p>
+<p>最初は「どこへ何をつなぐか」「LEDが何色か」を見られるだけでも十分です。</p>
+<figure><img src="/blog/openwrt/assets/026/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのWANポートとLANポートはどこを見分ければいい？</h3>
+<p>WANは回線機器につなぐ入口、LANはPCやスイッチにつなぐ側です。</p>
+<p>最初にここを間違えないだけでも切り分けがかなり楽になります。</p>
+<h3>LN6001-JPのLEDが赤い時は故障？</h3>
+<p>すぐに故障とは限りません。</p>
+<p>まずはWANケーブル、ONU/HGW電源、回線設定を順に確認すると切り分けしやすくなります。</p>
+<h3>LN6001-JPのリセットボタンはいつ使う？</h3>
+<p>LuCIやSSHで戻せない時の最後の手段として考えるのが安全です。</p>
+<p>押す前にバックアップや復旧手順を確認したほうが安心です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys MBE70 light behavior: https://support.linksys.com/kb/article/216-en/?section_id=175</li><li>Linksys MBE70 reset: https://support.linksys.com/kb/article/220-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

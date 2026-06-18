@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n40b623436544">APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】</a></p></blockquote>
+<h1>APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JPは、既存ルーター配下へアクセスポイント（AP）やWDS子機として追加できます。</p>
+<p>「既存ルーターはそのまま使いたい」「Wi‑Fiだけ強化したい」「有線が引けない場所へ子機を置きたい」といったケースでかなり役立ちます。</p>
+<p>ただし、最初からLuCIやCLIで手動設定しなくても大丈夫です。</p>
+<p>Linksys公式サポートでは、Setup Assistantを使ってAP BridgeやWDS子機を設定する流れが案内されています。</p>
+<p>この記事では、AP BridgeとWDSの違い、Setup Assistantを使う流れ、設定後に管理画面へ戻れなくならないためのポイントを整理します。</p>
+<figure><img src="/blog/openwrt/assets/032/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>AP BridgeとWDS子機の違い</li><li>LN6001-JPを既存ネットワークへ追加する考え方</li><li>Setup Assistantを使って安全に進める流れ</li><li>設定後に管理IPを見失わないポイント</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>既存ルーターはそのまま使い、LN6001-JPをAPとして追加したい</li><li>有線バックホールか無線子機かで迷っている</li><li>手動設定より、公式Setup Assistantから始めたい</li></ul>
+<figure><img src="/blog/openwrt/assets/032/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>この構成は、最初から手動で細かく触るより、まず次の3つを守るほうが安全です。</p>
+<ol><li>AP BridgeとWDSのどちらにするか決める</li><li>Setup Assistantを使って設定する</li><li>変更後の管理IPアドレスを必ず控える</li></ol>
+<p>特に管理IPを見失わないことが、設定後に戻れなくならないための基本です。</p>
+<p>最初は、「既存ルーターを残すか」「LN6001-JPを主ルーターにするか」を分けて考えると整理しやすくなります。</p>
+<h2>構成パターンの比較</h2>
+<table><thead><tr><th>構成</th><th>用途</th><th>LN6001-JPの役割</th></tr></thead><tbody><tr><td>ルーターモード（デフォルト）</td><td>LN6001-JPが1台でルーター・AP兼務</td><td>WAN←→LAN変換・DHCP</td></tr><tr><td>AP Bridge</td><td>既存ルーター配下へLN6001-JPをWi‑Fi APとして追加</td><td>親ルーターと同一サブネットのAP</td></tr><tr><td>WDS子機</td><td>親SSIDへ無線接続し、LN6001-JPを子機側APとして使う</td><td>無線バックホール用子機</td></tr></tbody></table>
+<p>最初は、「有線ならAP Bridge」「有線が難しいならWDS」くらいで整理すると分かりやすくなります。</p>
+<p>---</p>
+<p>最初は、LuCIやCLIを直接触るより、公式Setup Assistantから始めるほうが切り分けしやすくなります。</p>
+<p>Setup Assistantを入れる前に、管理IPと現在設定を控えます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/ap-wds-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+ubus call system board &gt; &quot;$BACKUP_DIR/system-board.json&quot; 2&gt;/dev/null || true
+uci show network &gt; &quot;$BACKUP_DIR/network.uci.txt&quot;
+uci show wireless &gt; &quot;$BACKUP_DIR/wireless.uci.txt&quot;
+uci show firewall &gt; &quot;$BACKUP_DIR/firewall.uci.txt&quot;
+cp /etc/config/network &quot;$BACKUP_DIR/network&quot;
+cp /etc/config/wireless &quot;$BACKUP_DIR/wireless&quot;
+cp /etc/config/firewall &quot;$BACKUP_DIR/firewall&quot;
+ifstatus lan &gt; &quot;$BACKUP_DIR/ifstatus-lan.json&quot; 2&gt;/dev/null || true
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot; 2&gt;/dev/null || true
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot; 2&gt;/dev/null || true
+
+echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
+<h2>Setup Assistantの導入手順</h2>
+<ol><li>Linksys公式サポートページ（https://support.linksys.com/kb/article/7195-jp/）から <code>setup-assistant.ipk</code> をダウンロード</li><li>LuCIで <strong>System</strong> → <strong>Software</strong> を開く</li><li><strong>Update lists</strong> をクリックしてパッケージリストを更新</li><li>完了後、<strong>Dismiss</strong> で閉じる</li><li><strong>Upload Package</strong> をクリック</li><li>ダウンロードした <code>setup-assistant.ipk</code> を <strong>Browse</strong> で選び、<strong>Upload</strong></li><li>確認画面で <strong>Install</strong> をクリック</li><li><code>installed in root is up to date.</code> と表示されたら <strong>Dismiss</strong> をクリック</li><li>ブラウザをリロードするか開き直し、<strong>Services</strong> → <strong>Setup Assistant</strong> が表示されることを確認</li></ol>
+<p>最初は、「Services → Setup Assistant」が見えるかを確認できれば十分です。</p>
+<p>SSHから確認する場合は、次を見ます。</p>
+<pre><code class="language-sh">opkg list-installed | grep -Ei &#x27;setup|assistant&#x27;
+logread | grep -Ei &#x27;setup|assistant|opkg&#x27; | tail -n 80</code></pre>
+<p>---</p>
+<p>AP Bridgeは、「既存ルーター配下へWi‑Fiを追加する」構成として考えると整理しやすくなります。</p>
+<h2>AP Bridgeの設定手順</h2>
+<p>AP Bridgeでは、親ルーター配下でLN6001-JPをアクセスポイントとして使います。</p>
+<p>公式Setup Assistantでは、必要項目を入力してまとめて反映します。</p>
+<ol><li><strong>Services</strong> → <strong>Setup Assistant</strong> を開く</li><li><strong>AP Bridge</strong> タブを選ぶ</li><li>以下の項目を入力する</li></ol>
+<table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>SSID</td><td>アクセスポイントとして出したいSSID</td></tr><tr><td>SSID Password</td><td>そのSSIDのパスワード</td></tr><tr><td>Gateway IP</td><td>親ルーターまたはホームゲートウェイのIPアドレス</td></tr><tr><td>Access Point IP</td><td>LN6001-JPに割り当てる同一サブネット内のIPアドレス</td></tr></tbody></table>
+<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li>念のためLN6001-JPを再起動</li><li>変更後は <strong>Access Point IP</strong> に指定したIPアドレスでLuCIへアクセス</li></ol>
+<p>最初は、「新しいIPアドレスでLuCIへ入り直せるか」を確認できればかなり十分です。</p>
+<p>設定後は、旧IPではなく新しく指定した <strong>Access Point IP</strong> に接続します。</p>
+<pre><code class="language-sh"># PC側から確認
+ping &lt;Access Point IP&gt;
+ssh root@&lt;Access Point IP&gt;
+
+# ルーター側へ入れたら状態確認
+uci show network.lan
+ip route show
+cat /tmp/dhcp.leases
+logread | tail -n 80</code></pre>
+<p>---</p>
+<p>WDSは、「有線が引けない場所へ子機を置く」用途とかなり相性があります。</p>
+<h2>WDS子機モードの設定手順</h2>
+<p>WDSは、有線バックホールではなく、親SSIDへ無線接続して子機側を構成する方式です。</p>
+<p>Linksys公式ページでは、WDS子機として使う場合もSetup Assistantで設定します。</p>
+<ol><li><strong>Services</strong> → <strong>Setup Assistant</strong> を開く</li><li><strong>WDS Configuration</strong> タブを選ぶ</li><li>以下の項目を入力する</li></ol>
+<table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>Parent SSID</td><td>親ルーターのSSID</td></tr><tr><td>Parent SSID Password</td><td>親SSIDのパスワード</td></tr><tr><td>Parent IP Address</td><td>親ルーターのIPアドレス</td></tr><tr><td>Child IP Address</td><td>LN6001-JP子機に割り当てる同一サブネット内のIPアドレス</td></tr></tbody></table>
+<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li>念のためLN6001-JPを再起動</li><li>子機側のIPアドレスでLuCIへアクセスできるか確認</li></ol>
+<p>最初は、「子機側IPアドレスへ入れるか」を確認するだけでもかなり役立ちます。</p>
+<p>WDS後の確認では、親SSIDへ接続できているか、子機側SSIDへ端末が接続できるかを分けます。</p>
+<pre><code class="language-sh"># 無線インターフェースと接続状態を確認
+wifi status
+iw dev
+iw dev &lt;wlan名&gt; link 2&gt;/dev/null || true
+
+# WDS/無線関連ログ
+logread | grep -Ei &#x27;wds|wifi|hostapd|wpa&#x27; | tail -n 100</code></pre>
+<p>---</p>
+<p>設定直後は、「壊れた」のではなく、「IPアドレスやWi‑Fi状態が変わっただけ」のケースもかなり多くあります。</p>
+<p>公式ページでは、うまくいかない場合に <strong>Network</strong> → <strong>Wireless</strong> を開き、Wi‑Fi関連インターフェース表示を確認して初期調整する手順が案内されています。</p>
+<p>初回表示で確認画面が出た場合は <strong>Continue</strong> をクリックし、Wi‑Fiサービス再起動後に画面が正しく表示されることを確認します。</p>
+<p>最初は、「新しいIPアドレスで入れているか」を確認するだけでもかなり切り分けしやすくなります。</p>
+<p>どうしても戻れない場合でも、SSHへ入れるなら直前のバックアップから戻せます。</p>
+<pre><code class="language-sh"># 変更前バックアップから戻す例
+cp /root/ap-wds-before-YYYYMMDD-HHMM/network /etc/config/network
+cp /root/ap-wds-before-YYYYMMDD-HHMM/wireless /etc/config/wireless
+cp /root/ap-wds-before-YYYYMMDD-HHMM/firewall /etc/config/firewall
+
+/etc/init.d/network restart
+wifi reload
+/etc/init.d/firewall restart</code></pre>
+<p>---</p>
+<p>AP BridgeやWDSでは、「設定自体は成功しているが、アクセス先IPが変わっていた」ケースがかなり多くあります。</p>
+<table><thead><tr><th>症状</th><th>原因</th><th>対処</th></tr></thead><tbody><tr><td>AP Bridge後にLuCIへアクセスできない</td><td>旧IPでアクセスしている</td><td>Setup Assistantで指定したAccess Point IPへアクセス</td></tr><tr><td>AP Bridgeで通信できない</td><td>Gateway IPまたはAccess Point IPが親ルーターサブネットと合っていない</td><td>親ルーターIPと同一サブネットか確認</td></tr><tr><td>WDS子機がつながらない</td><td>Parent SSIDまたはパスワードが違う</td><td>親SSIDと暗号化方式を確認して再入力</td></tr><tr><td>Setup AssistantがServicesに出ない</td><td>ブラウザ表示が更新されていない</td><td>ページ全体をリロード、またはブラウザを開き直す</td></tr></tbody></table>
+<p>最初は、「新しい管理IPへ入れるか」「親SSIDへ接続できているか」の2つを優先確認すると整理しやすくなります。</p>
+<p>---</p>
+<h2>まとめ</h2>
+<p>LN6001-JPは、既存ルーター配下へAP BridgeやWDS子機として追加できます。</p>
+<p>まずは、Setup Assistantを使って安全に構成し、変更後IPアドレスを必ず控えることがかなり重要です。</p>
+<p>有線バックホールならAP Bridge、無線で中継したいならWDS、と分けて考えると整理しやすくなります。</p>
+<p>最初は、「新しいIPでLuCIへ入り直せる」「親ネットワークへ普通に接続できる」の2つを確認できれば十分です。</p>
+<figure><img src="/blog/openwrt/assets/032/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのAP BridgeとWDSは何が違う？</h3>
+<p>AP Bridgeは有線で親ルーター配下へ入る構成、WDSは親SSIDへ無線接続する子機構成です。</p>
+<p>最初は、有線のAP Bridgeのほうが安定しやすくなります。</p>
+<h3>既存ルーター配下でLN6001-JPをアクセスポイントとして使える？</h3>
+<p>使えます。</p>
+<p>Setup AssistantのAP Bridgeを使うと、同一サブネットのアクセスポイントとして組み込みやすくなります。</p>
+<h3>LN6001-JPのWDSはメッシュWi‑Fiと同じ？</h3>
+<p>同じではありません。</p>
+<p>WDSは親SSIDへぶら下がる子機構成で、EasyMeshやVelop系メッシュとは別の仕組みです。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys AP/bridge/WDS setup assistant: https://support.linksys.com/kb/article/7195-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

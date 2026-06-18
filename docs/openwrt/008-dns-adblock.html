@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n4759cf81d0e1">DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】</a></p></blockquote>
+<h1>DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>DNS広告ブロックは、端末ごとに広告ブロックアプリを入れるのではなく、ルーター側のDNS名前解決で不要な通信先を減らす考え方です。</p>
+<p>LN6001-JPはOpenWrtベースなので、<code>luci-app-adblock</code> を使ってLuCIから比較的簡単に設定できます。</p>
+<p>ただし、最初から大量のブロックリストを入れすぎると、誤ブロックでWebサイトやアプリが正常に動かなくなることがあります。まずは少ないリストから始め、必要に応じて広げていくほうが扱いやすいです。</p>
+<p>また、DNS広告ブロックは「すべての広告を完全に消す機能」ではありません。アプリ内広告やDoH（DNS over HTTPS）を使う端末には効きにくいこともあります。</p>
+<p>この記事では、Adblockパッケージの導入、基本設定、誤ブロック対応、DoH対策までを、家庭・小規模オフィス向けに順番に整理します。</p>
+<figure><img src="/blog/openwrt/assets/008/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JPでDNS広告ブロックを導入する流れ</li><li>Adblockでできることと限界</li><li>誤ブロックが起きた時の戻し方</li><li>子ども用・IoT用ネットワークへ段階的に適用する考え方</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>家庭内の端末へまとめて広告ブロックを効かせたい</li><li>子ども用やIoT用ネットワークへ段階的に入れたい</li><li>Adblockの効果と限界を理解したうえで使いたい</li></ul>
+<figure><img src="/blog/openwrt/assets/008/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>Adblockも最初から全機能を有効にする必要はありません。むしろ、最初はシンプルな構成のほうが誤ブロックを切り分けやすくなります。</p>
+<p>まずは次の3つで十分です。</p>
+<ol><li>バックアップを取る</li><li><code>adblock</code> と <code>luci-app-adblock</code> を入れる</li><li>少ないブロックリストで試す</li></ol>
+<p>最初は「広告を全部消す」より、「誤ブロックなく安定して使えるか」を見ながら、適用範囲をゆっくり広げるほうが安全です。</p>
+<h2>DNS広告ブロックの仕組みと限界</h2>
+<p>DNS広告ブロックは、広告・トラッキングに使われるドメイン名をルーター側でブロックします。</p>
+<p>端末ごとにアプリを入れる方法とは異なり、家庭内の全端末へまとめて適用できるところが特徴です。</p>
+<p><strong>できること:</strong></p>
+<ul><li>一部の広告・トラッキングドメインを名前解決で抑える</li><li>IoT機器や子ども用端末の通信先を整理しやすくする</li><li>端末ごとの設定負担を減らす</li></ul>
+<p><strong>できないこと（限界）:</strong></p>
+<ul><li>すべての広告を消せるわけではない（同一ドメインからの広告は効かない）</li><li>アプリ内広告には効きにくい</li><li>端末側がDoH（DNS over HTTPS）を使うとルーターDNSを迂回される</li><li>誤ブロックが起きることがある</li></ul>
+<p>つまり、DNS広告ブロックは「万能な広告除去機能」というより、「不要な通信先を減らしてネットワークを整理する仕組み」と考えると分かりやすいです。</p>
+<h2>導入前に確認すること</h2>
+<p>DNS設定の変更は、業務用ソフトウェアや決済システムに影響する可能性があります。</p>
+<p>業務端末が含まれるネットワークへの適用は、まずテスト用SSIDやGuestネットワークで試してから広げるほうが安全です。</p>
+<p>いきなり全端末へ適用するより、まず家族用またはIoT用ネットワークで試してから広げるほうが、問題を切り分けしやすくなります。</p>
+<h2>導入前の状態確認とバックアップ</h2>
+<p>AdblockはDNS、DHCP、firewall、パッケージ状態に関係します。導入前に、現在の状態を保存しておきます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/adblock-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in dhcp firewall network; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+opkg list-installed &gt; &quot;$BACKUP_DIR/opkg-list-installed.txt&quot;
+df -h &gt; &quot;$BACKUP_DIR/df-h.txt&quot;
+free &gt; &quot;$BACKUP_DIR/free.txt&quot;
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>パッケージを追加する前に空き容量も確認します。</p>
+<pre><code class="language-sh">df -h
+opkg update
+opkg list | grep -E &#x27;^adblock|^luci-app-adblock|^banip|^luci-app-banip&#x27;</code></pre>
+<h2>セットアップが難しい場合は導入スクリプトを使う</h2>
+<p>Adblockを手動で入れて、ブロックリスト、Force Local DNS、DNS Report、DoH対策まで自分で整えるのが大変なら、以下のGitHubで公開している広告ブロック導入スクリプトを使う方法があります。</p>
+<p>最初から全部を手で組むより、まず動く状態を作ってから中身を理解していくほうが入りやすい人も多いです。</p>
+<ul><li>スクリプト: https://github.com/ikm-san/velop</li><li>内容: AdblockとLuCI用パッケージの導入、TOFUフィルターの追加、LAN向けDNS設定、Force Local DNS、自動更新cronなどをまとめて設定する</li><li>効果の目安: ブラウザ上の広告表示を大きく減らし、ルーター配下のスマホやPC全体に効かせやすくする</li><li>向く場面: 家庭や小規模オフィスで広告を減らしたい場合、子ども用端末のノイズを少し抑えたい場合</li></ul>
+<p>実行例:</p>
+<pre><code class="language-sh">curl -sS -o /tmp/adb_setup.sh https://raw.githubusercontent.com/ikm-san/velop/main/adb_setup.sh &amp;&amp; sh /tmp/adb_setup.sh -v</code></pre>
+<p>curl実行前に、GitHub上のREADMEやスクリプト内容を確認してから進めることをおすすめします。</p>
+<p>スクリプトはルーター設定を変更し、最後に再起動確認も行います。</p>
+<p>広告ブロックの効果はサイトやアプリの作りによって変わるため、実行前にLuCIのバックアップを取得し、READMEとスクリプト内容を確認してください。</p>
+<p>業務端末や決済端末が同じネットワークにある場合は、いきなり全体へ適用せず、影響範囲を確認してから使います。</p>
+<h2>Adblockパッケージのインストール</h2>
+<p>LN6001-JPでは、LuCIからパッケージを追加できます。</p>
+<p>最初はCLIより、LuCIのSoftware画面から進めたほうが確認しやすいです。</p>
+<h3>LuCIでインストール</h3>
+<ol><li><strong>System</strong> → <strong>Software</strong> を開く</li><li><strong>Update lists</strong> をクリックしてパッケージリストを更新する</li><li>検索ボックスに <code>adblock</code> と入力</li><li><code>luci-app-adblock</code> を見つけて <strong>Install</strong> をクリック</li><li><code>adblock</code> も見つけて <strong>Install</strong> をクリック（依存関係として自動インストールされる場合もある）</li><li>LuCIページを更新する（F5）</li></ol>
+<p>インストール直後は少し時間がかかることがあります。画面が更新されるまで数十秒待つと反映される場合があります。</p>
+<h3>CLIでインストール</h3>
+<pre><code class="language-sh">echo &quot;### update package lists&quot;
+opkg update
+
+echo &quot;### install adblock packages&quot;
+opkg install adblock luci-app-adblock
+
+echo &quot;### verify installed packages&quot;
+opkg list-installed | grep adblock</code></pre>
+<p>CLIの <code>opkg install</code> は便利ですが、最初はLuCIでパッケージ名を確認しながら進めるほうが分かりやすいです。</p>
+<p>インストール後、LuCIメニューの <strong>Services</strong> に <strong>Adblock</strong> が追加されます。</p>
+<h2>Adblockの基本設定</h2>
+<p>最初は「少ないブロックリストで安定動作するか」を優先すると、あとから調整しやすくなります。</p>
+<h3>LuCIからAdblockを設定する</h3>
+<ol><li><strong>Services</strong> → <strong>Adblock</strong> を開く</li><li><strong>Settings</strong> タブの主要設定:</li></ol>
+<table><thead><tr><th>設定項目</th><th>推奨値</th><th>説明</th></tr></thead><tbody><tr><td>Enabled</td><td>チェック</td><td>Adblockを有効化</td></tr><tr><td>Force Local DNS</td><td>チェック</td><td>端末にルーター側DNSを使わせる</td></tr><tr><td>DNS Report</td><td>チェック</td><td>DNSリクエストとブロック状況を確認しやすくする</td></tr><tr><td>DNS backend</td><td><code>dnsmasq</code>（デフォルト）</td><td>LN6001-JPで標準使用</td></tr></tbody></table>
+<ol><li><strong>Blocklist Sources</strong> タブ:</li></ol>
+<ul><li>利用するブロックリストにチェックを入れる</li><li>推奨の初期設定:</li><li><code>adguard</code>: 広告・トラッキング</li><li><code>disconnect</code>: トラッキング中心</li><li><code>hagezi</code> または <code>yoyo</code>: 広告中心（日本語サイトにも比較的有効）</li><li>最初は2〜3リストから始め、誤ブロックが出たら調整する</li></ul>
+<p>最初から大量のリストを有効化すると、誤ブロック時の原因切り分けが難しくなります。まずは2〜3個から始めるほうが現実的です。</p>
+<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li><strong>Action</strong> タブで <strong>Reload</strong> をクリックしてブロックリストを適用</li></ol>
+<h3>CLIで確認・操作</h3>
+<pre><code class="language-sh">echo &quot;### Adblock status&quot;
+/etc/init.d/adblock status
+
+echo &quot;### Reload Adblock&quot;
+/etc/init.d/adblock reload
+
+echo &quot;### Blocklist files&quot;
+ls -l /tmp/adblock 2&gt;/dev/null || true
+wc -l /tmp/adblock/adb_list* 2&gt;/dev/null || true
+
+echo &quot;### DNS service&quot;
+/etc/init.d/dnsmasq status
+
+echo &quot;### Recent Adblock logs&quot;
+logread | grep -Ei &#x27;adblock|dnsmasq&#x27; | tail -n 80</code></pre>
+<p><code>/etc/init.d/adblock status</code> と <code>logread | grep -i adblock</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「今どう動いているか」を確認する用途で使うくらいで十分です。</p>
+<h2>ホワイトリスト（許可リスト）の設定</h2>
+<p>誤ブロックが発生した場合は、特定のドメインをホワイトリストへ追加します。</p>
+<p>広告ブロック運用では、「必要なものだけ戻せる」ことがかなり重要です。</p>
+<h3>LuCIでホワイトリストを追加</h3>
+<ol><li><strong>Services</strong> → <strong>Adblock</strong> → <strong>Allowlist</strong> タブを開く</li><li>テキストボックスに許可するドメインを1行1ドメインで入力:</li></ol>
+<pre><code>example.com
+api.business-service.jp
+payment-gateway.com</code></pre>
+<ol><li><strong>Save &amp; Apply</strong> をクリック</li><li><strong>Action</strong> → <strong>Reload</strong> でリストを再適用</li></ol>
+<h3>UCIでホワイトリストを編集</h3>
+<pre><code class="language-sh"># ホワイトリストファイルを直接編集
+vi /etc/adblock/adblock.whitelist
+
+# 追記する場合
+echo &quot;example.com&quot; &gt;&gt; /etc/adblock/adblock.whitelist
+
+# Adblockをリロード
+/etc/init.d/adblock reload</code></pre>
+<p>最初はLuCIから追加したほうが分かりやすいですが、複数台を管理する場合はCLI管理のほうが整理しやすくなることがあります。</p>
+<h2>DNSを端末グループ別に設定する</h2>
+<p>Guest Wi‑FiやVLANを使っている場合は、ネットワークごとにDNS方針を変えることもできます。</p>
+<p>例えば、家族用は通常DNS、子ども用はFamily DNS、IoT用は広告ブロックDNSという分け方も可能です。</p>
+<h3>子ども用ネットワークにフィルタリングDNSを設定する</h3>
+<p>フィルタリングDNS（例: Cloudflare 1.1.1.3、Google SafeSearch）を子ども用SSIDのDHCPで配布します:</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> で子ども用インターフェース（例: <code>kids</code>）の <strong>Edit</strong> をクリック</li><li><strong>DHCP Server</strong> → <strong>Advanced Settings</strong> タブを開く</li><li><strong>DHCP Options</strong> に以下を追加:</li></ol>
+<ul><li><code>6,1.1.1.3,1.0.0.3</code>（Cloudflare Family DNS）</li><li>または <code>6,8.8.8.8,8.8.4.4</code>（Google DNS）</li></ul>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<h3>CLIでDHCPのDNS配布を設定</h3>
+<pre><code class="language-sh">echo &quot;### backup DHCP config&quot;
+cp /etc/config/dhcp /etc/config/dhcp.backup.$(date +%Y%m%d-%H%M)
+
+echo &quot;### add DNS option for kids&quot;
+uci add_list dhcp.kids.dhcp_option=&#x27;6,1.1.1.3,1.0.0.3&#x27;
+uci changes dhcp
+uci commit dhcp
+/etc/init.d/dnsmasq restart</code></pre>
+<p>DNS設定を変更したあと、端末側でWi‑Fiを一度切断・再接続すると、新しいDNS設定を受け取りやすくなります。</p>
+<h2>DoH（DNS over HTTPS）への対応</h2>
+<p>端末側がDoHを使うと、ルーターのDNS設定を迂回します。</p>
+<p>主にChromeブラウザやFirefoxがDoHを自動的に使う場合があります。</p>
+<p><strong>確認方法:</strong> ブラウザのDNS設定でDoHが有効になっているか確認します。</p>
+<ul><li>Chrome: 設定 → プライバシーとセキュリティ → セキュリティ → セキュアDNSを使用する</li><li>Firefox: 設定 → 一般 → ネットワーク設定 → DNS over HTTPS</li></ul>
+<p><strong>対応策（一例）:</strong> Linksys公式手順では、DoH迂回への対策例として <code>luci-app-banip</code> を追加し、banIP側でDoHブロックを有効化する流れが案内されています。家庭内で簡単に運用するなら、まず端末側のDoHを無効化し、必要に応じてbanIPを使う順番が現実的です。</p>
+<p>まずは「端末側DoHを無効化する」くらいから始め、必要に応じてbanIPを追加するほうが運用しやすいです。</p>
+<h2>誤ブロックへの対応フロー</h2>
+<p>広告ブロック運用で一番大事なのは、「問題が起きた時にすぐ戻せること」です。</p>
+<p>そのため、まず一時停止 → 原因確認 → ホワイトリスト追加、の順で切り分けると分かりやすくなります。</p>
+<ol><li><strong>Adblockを一時無効化して確認する</strong>:</li></ol>
+<ul><li>LuCI: Services → Adblock → Settings → Enabled のチェックを外す → Save &amp; Apply</li><li>CLI: <code>/etc/init.d/adblock stop</code></li><li>一時無効化で問題が解決すれば、Adblock側が原因と切り分けやすくなる</li></ul>
+<ol><li><strong>どのドメインがブロックされているか確認する</strong>:</li></ol>
+<pre><code class="language-sh">echo &quot;### Check blocked domain in runtime lists&quot;
+grep &quot;domain-to-check.com&quot; /tmp/adblock/adb_list*
+
+echo &quot;### Recent DNS/Adblock logs&quot;
+logread | grep -Ei &#x27;adblock|dnsmasq|domain-to-check&#x27; | tail -n 80</code></pre>
+<ol><li><strong>ホワイトリストに追加する</strong>（上記の手順参照）</li></ol>
+<ol><li><strong>ブロックリストを見直す</strong>:</li></ol>
+<ul><li>Services → Adblock → Blocklist Sources でリストを減らす</li></ul>
+<h2>よくある誤ブロックの例</h2>
+<ul><li>ログイン画面が開かない（認証サービスのドメインがブロックされている）</li><li>アプリ内の画像が表示されない（CDNドメインがブロックされている）</li><li>決済画面が止まる（決済サービスのドメインがブロックされている）</li><li>スマート家電のクラウド連携が不安定になる（IoTクラウドドメインがブロックされている）</li></ul>
+<p>特に決済・認証・CDN系ドメインは誤ブロック時の影響が大きいため、店舗や業務用途では慎重に確認したほうが安心です。</p>
+<h2>設定変更前のバックアップ</h2>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/dns-before-change-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in dhcp firewall network; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+opkg list-installed | grep -Ei &#x27;adblock|banip|dnsmasq&#x27; &gt; &quot;$BACKUP_DIR/dns-packages.txt&quot; || true
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>DNSやfirewall周辺は、あとからGuest Wi‑FiやVLAN設定とも関係してきます。変更前バックアップを残しておくと、切り分けがかなり楽になります。</p>
+<h2>まとめ</h2>
+<p>Adblockは「広告が全部消える機能」ではなく、DNS名前解決の段階で不要な通信先を減らすツールです。</p>
+<p>期待値を合わせた上で、まずは少ないブロックリストから始め、段階的に適用範囲を広げるほうが運用しやすくなります。</p>
+<p>設定後は、次の3つが確認できれば十分です。最初から完璧な広告ブロックを目指す必要はありません。</p>
+<ul><li>インターネット自体は普段どおり使える</li><li>体感できる範囲で広告や不要通信が減っている</li><li>誤ブロック時に一時停止やホワイトリスト追加で戻せる</li></ul>
+<figure><img src="/blog/openwrt/assets/008/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPで広告ブロックはできる？</h3>
+<p>できます。<code>adblock</code> と <code>luci-app-adblock</code> を入れると、LuCIからDNS広告ブロックを管理できます。</p>
+<h3>DNS広告ブロックで広告は全部消える？</h3>
+<p>消えません。同一ドメイン配信の広告やアプリ内広告には効きにくく、DoHを使われると迂回されることもあります。</p>
+<p>「全部消す」より、「不要な通信を減らして快適にする」くらいの期待値で使うほうが現実的です。</p>
+<h3>誤ブロックが起きたらどうする？</h3>
+<p>まずAdblockを一時停止して原因を切り分け、その後でホワイトリストへ必要なドメインを追加する流れが安全です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT Adblock setup: https://support.linksys.com/kb/article/6711-en/?section_id=175</li><li>ikm-san velop 広告ブロック導入スクリプト: https://github.com/ikm-san/velop</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n61235a13b478">IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】</a></p></blockquote>
+<h1>IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>IPv6では、IPv4のNAT前提とはネットワークの見え方がかなり変わります。</p>
+<p>特にIPoEやIPv4 over IPv6環境では、「IPv4は生きているがIPv6だけ不安定」「WAN6だけ落ちている」といった状態も起きます。</p>
+<p>ただし、最初からIPv6を全部深く理解しようとしなくても大丈夫です。</p>
+<p>まずは「IPv4とIPv6を分けて確認する」「WAN6を見る」「firewallをIPv6側まで確認する」だけでも、切り分けはかなりしやすくなります。</p>
+<p>LN6001-JPでIPv6/IPoEを使う際に見落としやすいポイントと、まず覚えておきたい確認コマンドを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/019/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>IPv4とIPv6を分けて確認する理由</li><li>IPoE環境で見落としやすいIPv6側の確認ポイント</li><li>prefix delegation や firewall をどう見ればいいか</li><li>WAN6トラブル時の基本的な切り分け順序</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>IPv4はつながるのに一部通信だけ不安定</li><li>IPoE環境でIPv6側の見方が分からない</li><li>WAN6やprefix delegationをどこまで見ればいいか迷っている</li></ul>
+<figure><img src="/blog/openwrt/assets/019/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>IPv6も、最初から全部を深く理解しなくても大丈夫です。</p>
+<p>まずは次の3つだけ見れば十分です。</p>
+<ol><li><code>ifstatus wan6</code> でIPv6アドレスを確認する</li><li><code>ping6</code> でIPv6疎通を見る</li><li><code>ip6tables -L -n -v</code> または <code>nft list ruleset</code> でIPv6 firewallを見る</li></ol>
+<p>IPv4とIPv6を分けて考えるだけでも、切り分けはかなりしやすくなります。</p>
+<p>最初は「IPv6だけ生きているのか」「IPv4だけ落ちているのか」を分けられるだけでも十分です。</p>
+<p>IPoE環境では、「インターネット」という1つの塊ではなく、「IPv4側」と「IPv6側」が別々に動いているイメージで見ると整理しやすくなります。</p>
+<h2>IPv6とIPv4を分けて確認する</h2>
+<p>IPoE環境では、IPv4とIPv6は別々の経路で動いています。</p>
+<p>「インターネットにつながらない」という症状も、IPv4側の問題かIPv6側の問題かで原因が変わります。</p>
+<table><thead><tr><th>確認対象</th><th>コマンド</th><th>見るべき内容</th></tr></thead><tbody><tr><td>WAN（IPv4）</td><td><code>ifstatus wan</code></td><td>ipaddr（IPアドレスを取得しているか）</td></tr><tr><td>WAN6（IPv6）</td><td><code>ifstatus wan6</code></td><td>ip6addr（IPv6アドレスを取得しているか）</td></tr><tr><td>ルーティング</td><td><code>ip route show</code> / <code>ip -6 route show</code></td><td>デフォルトゲートウェイが存在するか</td></tr><tr><td>DNS</td><td><code>nslookup www.google.co.jp</code></td><td>名前解決できるか</td></tr></tbody></table>
+<p>最初は <code>ifstatus wan</code> と <code>ifstatus wan6</code> を分けて見るだけでもかなり意味があります。</p>
+<p>特にIPv4 over IPv6環境では、「WAN6は正常だがIPv4 over IPv6側だけ落ちている」ケースもあります。</p>
+<h3>確認コマンドの実行例</h3>
+<pre><code class="language-sh"># WAN（IPv4 over IPv6の場合はIPv4が割り当てられているか確認）
+ifstatus wan | grep -E &#x27;&quot;up&quot;|&quot;ipaddr&quot;&#x27;
+
+# WAN6（IPv6アドレスとprefix delegation確認）
+ifstatus wan6 | grep -E &#x27;&quot;up&quot;|&quot;ip6addr&quot;|&quot;ip6prefix&quot;&#x27;
+
+# IPv6アドレス一覧
+ip -6 addr show
+
+# IPv6ルーティングテーブル
+ip -6 route show
+
+# IPv6の疎通確認
+ping6 -c 3 2001:4860:4860::8888
+
+# IPv4の疎通確認
+ping -c 3 8.8.8.8</code></pre>
+<p><code>ifstatus wan6</code> と <code>ip -6 route show</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「今どうつながっているか」を確認する用途で使うくらいでも十分です。</p>
+<p>IPv6トラブルでは、「IPv4感覚のまま見てしまう」ことが原因になるケースもかなり多くあります。</p>
+<h3>設定変更前に状態を保存する</h3>
+<p>IPv6/IPoEの切り分けでは、変更する前の状態が重要です。</p>
+<p>まずは読み取り中心で確認し、設定変更に入る前だけバックアップを取ります。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/ipv6-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+cp /etc/config/network &quot;$BACKUP_DIR/network&quot;
+cp /etc/config/firewall &quot;$BACKUP_DIR/firewall&quot;
+cp /etc/config/dhcp &quot;$BACKUP_DIR/dhcp&quot;
+
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot; 2&gt;/dev/null || true
+ifstatus wan6 &gt; &quot;$BACKUP_DIR/ifstatus-wan6.json&quot; 2&gt;/dev/null || true
+ip route show &gt; &quot;$BACKUP_DIR/ip-route-v4.txt&quot;
+ip -6 route show &gt; &quot;$BACKUP_DIR/ip-route-v6.txt&quot;
+ip -6 addr show &gt; &quot;$BACKUP_DIR/ip-addr-v6.txt&quot;
+logread | grep -i &#x27;ipv6\|dhcpv6\|odhcp6c\|radvd\|ip6&#x27; | tail -n 120 &gt; &quot;$BACKUP_DIR/ipv6-log.txt&quot;
+
+echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
+<p>IPoEやIPv4 over IPv6の不具合は、設定変更後に元の状態が分からなくなると切り分けが難しくなります。</p>
+<p>「変更する前に保存する」だけで、戻しやすさがかなり変わります。</p>
+<h3>落とし穴1: IPv4のみ確認してIPv6側の問題を見落とす</h3>
+<p>症状: 一部のサイトが遅い、特定のアプリが不安定、IPv4では表示されるがIPv6では見えない</p>
+<p>確認方法:</p>
+<pre><code class="language-sh"># IPv4とIPv6を分けて疎通確認
+ping -c 3 8.8.8.8           # IPv4 OK?
+ping6 -c 3 2001:4860:4860::8888  # IPv6 OK?
+nslookup www.google.co.jp   # DNS OK?
+
+# IPv6側のDNS確認
+nslookup -type=AAAA www.google.co.jp
+
+# 実際にIPv6経路を使っているか確認
+traceroute6 www.google.co.jp 2&gt;/dev/null || true</code></pre>
+<p>最初は「IPv4だけ正常なのか」「IPv6だけ正常なのか」を分けるだけでも、かなり切り分けしやすくなります。</p>
+<h3>落とし穴2: IPv6でNATがないためfirewallが重要になる</h3>
+<p>IPv4では、NATで内部端末が外から見えにくい構造があります。</p>
+<p>IPv6では端末へグローバルIPv6アドレスが割り当てられる場合があるため、firewall確認がかなり重要になります。</p>
+<p>確認:</p>
+<pre><code class="language-sh"># firewallのIPv6設定を確認
+uci show firewall | grep -E &#x27;wan|zone&#x27;
+
+# ip6tables互換ルール確認
+ip6tables -L -n -v 2&gt;/dev/null || true
+
+# nftables側で見える環境ではこちらも確認
+nft list ruleset 2&gt;/dev/null | grep -E &#x27;ip6|icmpv6|reject|drop|wan&#x27; | head -n 100</code></pre>
+<p>最初は「WAN側InputがREJECTになっているか」を確認するだけでも十分です。</p>
+<p>LN6001-JPのOpenWrtは標準でip6tablesルールを持っています。</p>
+<p>WANゾーンからの入力はREJECTが基本です。</p>
+<h3>落とし穴3: Prefix Delegationが取得できないとLAN側のIPv6が配布されない</h3>
+<p>IPoE環境では、ルーターがプロバイダから「/56」や「/48」などのIPv6プレフィックス（アドレスブロック）を取得し、LAN端末へ配布します（DHCPv6-PD）。</p>
+<pre><code class="language-sh"># プレフィックス委任（PD）の状態確認
+ifstatus wan6 | grep -i &#x27;prefix\|ip6prefix&#x27;
+
+# odhcp6cのログ確認
+logread | grep -i &#x27;odhcp6c\|dhcpv6\|prefix&#x27; | tail -n 80
+
+# LAN側のIPv6設定確認
+uci show network.lan6 2&gt;/dev/null || uci show network | grep -i &#x27;ip6&#x27;
+
+# LAN端末へのIPv6アドレス配布状況
+ip -6 addr show br-lan</code></pre>
+<p>WAN6がupでも、prefix delegationが崩れているとLAN側だけIPv6不安定になることがあります。</p>
+<p>プレフィックスが取得されていない場合は、まずWAN6状態を確認します。</p>
+<h3>落とし穴4: IPoEとIPv4 over IPv6の言葉を混同する</h3>
+<table><thead><tr><th>用語</th><th>意味</th></tr></thead><tbody><tr><td>IPoE</td><td>IPv6を使ってインターネットへ接続する方式</td></tr><tr><td>IPv4 over IPv6</td><td>IPv6網の上でIPv4通信を扱う仕組み（MAP-E/DS-Liteなど）</td></tr><tr><td>OCNバーチャルコネクト</td><td>NTTコム系のIPv4 over IPv6サービス（MAP-E方式）</td></tr><tr><td>transix</td><td>インターネットマルチフィードのIPv4 over IPv6サービス（DS-Lite方式）</td></tr></tbody></table>
+<p>最初は、「IPoE = IPv6側の接続方式」「IPv4 over IPv6 = IPv4も通す仕組み」くらいで整理すると分かりやすくなります。</p>
+<p>IPoEとIPv4 over IPv6は別の話です。</p>
+<p>IPoEだけではIPv4サイトへアクセスできない場合があり、IPv4 over IPv6設定が別途必要になります。</p>
+<p>IPv6トラブルでは、「WAN6」「DHCPv6」「DNS」「firewall」を順番に見ると切り分けしやすくなります。</p>
+<p>公式IPoEモジュールやWAN設定を触る前に、まず現在の回線方式を確認します。</p>
+<pre><code class="language-sh"># 現在のWAN/WAN6プロトコルを確認
+uci show network.wan
+uci show network.wan6 2&gt;/dev/null || true
+
+# Linksys公式IPoEモジュール導入済みか確認する目安
+opkg list-installed | grep -Ei &#x27;ipoe|map|dslite|ipip&#x27; || true</code></pre>
+<p>Linksys公式サポートでは、多くの回線はIPv4/IPv6ともDHCP自動で利用でき、PPPoEや固定IP/IPIPなどは方式に応じて設定します。</p>
+<p>IPv6だけを疑う前に、「自分の回線がDHCP自動でよいのか」「PPPoEや固定IP/IPIPの設定が必要なのか」を整理すると、不要な変更を減らせます。</p>
+<h2>IPv6関連のログ確認</h2>
+<pre><code class="language-sh"># IPv6関連のログを確認
+logread | grep -i &#x27;ipv6\|dhcpv6\|radvd\|ip6&#x27; | tail -n 50
+
+# DNS関連のログ（dnsmasq）
+logread | grep -i dnsmasq | tail -n 30
+
+# ファイアウォールのIPv6ログ
+logread | grep -i &#x27;DROP\|REJECT&#x27; | grep -i &#x27;ipv6\|ip6&#x27; | tail -n 30</code></pre>
+<p>最初は「error」「fail」「reject」が大量に出ていないかを見るくらいでも十分役立ちます。</p>
+<p>IPv6問題では、「WAN6」「prefix delegation」「DNS」のどこで止まっているかを分けて考えると整理しやすくなります。</p>
+<h2>IPv6のよくある症状と対処</h2>
+<table><thead><tr><th>症状</th><th>確認ポイント</th><th>対処</th></tr></thead><tbody><tr><td>IPv6アドレスが取れない</td><td><code>ifstatus wan6</code> でupになっているか</td><td>IPoE設定を確認、公式IPoEモジュールを再確認</td></tr><tr><td>LAN端末にIPv6が配布されない</td><td>prefix delegationが取れているか</td><td><code>uci show network</code>でipv6設定確認</td></tr><tr><td>一部サイトだけ遅い</td><td>IPv6/IPv4の経路を分けて確認</td><td>IPv6を使っているサービスかどうか確認</td></tr><tr><td>DNSでAAAAレコードが引けない</td><td>DNS設定</td><td><code>uci show dhcp</code>でDNSサーバー設定確認</td></tr><tr><td>VPN経由でIPv6が使えない</td><td>VPNのIP設定</td><td>WireGuardのAllowedIPsにIPv6範囲を追加</td></tr></tbody></table>
+<p>最初は、「WAN6が正常か」「LAN側へIPv6が配られているか」を分けて確認するだけでもかなり役立ちます。</p>
+<h2>買う前チェックリスト（IPoE環境用）</h2>
+<p>LN6001-JPをIPoE環境で使う前に、次を確認しておくと切り分けしやすくなります:</p>
+<ul><li>プロバイダのIPv4 over IPv6方式（MAP-E/DS-Lite/IPIP）</li><li>ひかり電話ホームゲートウェイの有無</li><li>HGWがある場合: LN6001-JPとHGWのLAN IPアドレス重複確認</li><li>既存ルーターのLAN側IPアドレス</li><li>LinksysオートIPoEモジュールの対応方式確認（https://support.linksys.com/kb/article/6902-jp/）</li></ul>
+<h2>まとめ</h2>
+<p>IPv6/IPoE環境では、次の順番で確認すると整理しやすくなります:</p>
+<ol><li><code>ifstatus wan</code> と <code>ifstatus wan6</code> を分けて確認する</li><li>IPv4とIPv6の疎通テストを分けて実行する（<code>ping</code> / <code>ping6</code>）</li><li><code>ip6tables -L -n -v</code> または <code>nft list ruleset</code> でIPv6 firewallを確認する</li><li>Prefix Delegation取得状態を確認する</li><li>WAN6 → DNS → firewall → LAN端末側の順に切り分ける</li></ol>
+<p>IPv6を特別に怖いものとして扱う必要はありません。</p>
+<p>「IPv4とIPv6で見る場所が違う」「firewallもIPv6側まで確認する」という2点を押さえるだけでも、トラブル時の見通しはかなり改善します。</p>
+<p>最初は「WAN6が正常か」「IPv6疎通できるか」を確認できれば十分です。</p>
+<figure><img src="/blog/openwrt/assets/019/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>IPv6だけつながらない時は何を見ればいい？</h3>
+<p><code>ifstatus wan6</code>、<code>ping6</code>、<code>ip6tables -L -n -v</code> の3つを分けて見ると切り分けしやすくなります。</p>
+<p>最初は「WAN6がupか」「IPv6 pingが通るか」だけでもかなり役立ちます。</p>
+<h3>IPv4がつながっていればIPv6は気にしなくていい？</h3>
+<p>IPoE環境ではIPv4とIPv6が別経路で動くため、片方だけ不調ということがあります。</p>
+<p>両方を分けて確認することが大事です。</p>
+<h3>prefix delegation は何のために見る？</h3>
+<p>LAN側端末へIPv6プレフィックスが正しく配られているかを見るためです。</p>
+<p>ここが崩れると、WAN6はつながっていても端末側が不安定になることがあります。</p>
+<h2>参考リンク</h2>
+<ul><li>OpenWrt IPoE等インターネットサービスの設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

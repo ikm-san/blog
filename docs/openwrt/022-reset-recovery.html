@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n5088d68a2205">リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】</a></p></blockquote>
+<h1>リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>設定変更後に「管理画面へ入れない」「Wi‑Fiが消えた」「ネットにつながらない」となっても、すぐ初期化する必要はありません。</p>
+<p>LN6001-JPでは、有線LAN・LuCI・SSHを使って設定を戻したり、バックアップから復元できるケースがあります。</p>
+<p>ただし、最初から全部を深く調べなくても大丈夫です。</p>
+<p>まずは「有線で入れるか」「最後に何を変えたか」「バックアップがあるか」を確認するだけでも、かなり復旧しやすくなります。</p>
+<p>この記事では、ソフトリセットとハードリセットの違い、SSHから戻す方法、バックアップ復元の流れ、リセット前に確認したいポイントを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/022/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>リセット前に試したい復旧手順</li><li>ソフトリセットとハードリセットの違い</li><li>SSHやバックアップから戻す考え方</li><li>「壊れた」と思っても実は戻せるケース</li></ul>
+<h2>こんな時に向いています</h2>
+<ul><li>設定変更後にLuCIへ入れなくなって不安</li><li>いきなりリセットしてよいか迷っている</li><li>初期化せず戻せる可能性を先に確認したい</li></ul>
+<figure><img src="/blog/openwrt/assets/022/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>復旧時も、最初から全部試す必要はありません。</p>
+<p>まずは次の3つで十分です。</p>
+<ol><li>有線LANでLuCIへ入れるか確認する</li><li>最後に変更した設定を思い出す</li><li>バックアップから戻せないか確認する</li></ol>
+<p>「すぐ初期化する」より、「まだ戻せる余地があるか」を先に確認するほうが安全です。</p>
+<p>特にLAN IP変更やfirewall設定変更直後は、実はルーター自体は壊れていないケースもかなり多くあります。</p>
+<p>OpenWrt系では、「初期化しかない」と思われがちですが、設定ファイル単位で戻せるケースもあります。</p>
+<h2>リセットの種類</h2>
+<table><thead><tr><th>リセット種別</th><th>操作</th><th>結果</th><th>バックアップが必要か</th></tr></thead><tbody><tr><td>ソフトリセット（LuCI）</td><td>LuCIから実行</td><td>全設定を初期化</td><td>はい</td></tr><tr><td>ハードリセット（ボタン）</td><td>本体リセットボタン長押し</td><td>全設定を初期化</td><td>はい</td></tr><tr><td>設定ファイルのロールバック</td><td>SSHでバックアップファイルをコピー</td><td>変更前の設定に戻す</td><td>バックアップファイルが必要</td></tr><tr><td>バックアップ復元</td><td>LuCI/sysupgrade -r</td><td>バックアップ時点の全設定に戻す</td><td>はい</td></tr></tbody></table>
+<p>最初は、「全部初期化」より「直前に触った設定だけ戻せないか」を考えるほうが整理しやすくなります。</p>
+<p>---</p>
+<h2>リセット前の確認チェックリスト</h2>
+<p>実際には、「設定は生きているがアクセス先IPが変わっていた」だけのケースもあります。</p>
+<p>初期化する前に以下を確認します:</p>
+<ul><li>[ ] LANケーブルでPCとLN6001-JPのLANポートを接続できるか</li><li>[ ] <code>192.168.1.1</code>（または変更後のLAN IP）でLuCIにアクセスできるか</li><li>[ ] 直前に変更した設定（LAN IP、firewall、VLAN等）が何かを把握しているか</li><li>[ ] LuCIまたはSSHのバックアップファイルはあるか</li><li>[ ] opkgでインストールしたパッケージのリストを保存してあるか</li></ul>
+<p>これらのうち一つでも手がかりがあれば、初期化せず復旧できる可能性があります。</p>
+<p>最初は「最後に何を変えたか」を思い出すだけでもかなり役立ちます。</p>
+<p>SSHへ入れる場合は、初期化前に今の状態だけでも保存します。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/recovery-before-reset-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+ubus call system board &gt; &quot;$BACKUP_DIR/system-board.json&quot; 2&gt;/dev/null || true
+uptime &gt; &quot;$BACKUP_DIR/uptime.txt&quot;
+df -h &gt; &quot;$BACKUP_DIR/df-h.txt&quot;
+ip addr show &gt; &quot;$BACKUP_DIR/ip-addr.txt&quot;
+ip route show &gt; &quot;$BACKUP_DIR/ip-route.txt&quot;
+ip -6 route show &gt; &quot;$BACKUP_DIR/ip6-route.txt&quot;
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot; 2&gt;/dev/null || true
+ifstatus wan6 &gt; &quot;$BACKUP_DIR/ifstatus-wan6.json&quot; 2&gt;/dev/null || true
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot; 2&gt;/dev/null || true
+logread | tail -n 200 &gt; &quot;$BACKUP_DIR/logread-tail.txt&quot;
+
+sysupgrade -b &quot;$BACKUP_DIR/config-backup.tar.gz&quot;
+opkg list-installed &gt; &quot;$BACKUP_DIR/opkg-list-installed.txt&quot;
+
+echo &quot;saved: $BACKUP_DIR&quot;</code></pre>
+<p>このバックアップはルーター本体内に置かれるため、本当に初期化する前にはPCへコピーします。</p>
+<pre><code class="language-sh"># PC側のターミナルで実行
+scp -r root@192.168.1.1:/root/recovery-before-reset-* ~/Downloads/</code></pre>
+<p>---</p>
+<h2>ソフトリセット（LuCIから初期化）</h2>
+<p>LuCIへ入れるなら、まだかなり復旧しやすい状態です。</p>
+<p>LuCIにアクセスできる場合:</p>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Perform reset</strong> ボタンをクリック</li><li>確認ダイアログで <strong>OK</strong> をクリック</li><li>ルーターが再起動し、工場出荷設定に戻る（約2分待つ）</li></ol>
+<p>最初は「バックアップを取ってから初期化する」だけでもかなり安全性が変わります。</p>
+<p>初期化後は次が工場出荷状態へ戻ります:</p>
+<ul><li>管理者パスワード: 本体底面ラベルの初期パスワードに戻る</li><li>LAN IP: <code>192.168.1.1</code></li><li>Wi-Fi SSID/パスワード: 工場出荷時のもの（本体ラベルに記載）</li></ul>
+<p>---</p>
+<h2>ハードリセット（リセットボタン）</h2>
+<p>LuCIへ入れない場合でも、有線LANやSSHがまだ使えるケースがあります。</p>
+<p>物理リセットは最後の手段として考えるほうが安全です。</p>
+<p>LuCIにアクセスできない場合（管理パスワード忘れ等）:</p>
+<ol><li>LN6001-JPの電源が入った状態で待機</li><li>本体裏面または底面の <strong>RESET</strong> ボタンを確認</li><li>クリップや細いピンを使い、リセットボタンを約10秒間押し続ける</li><li>LEDが赤点灯から青点滅へ変わり、再起動していることを確認する</li><li>再起動後、インターネット接続を検知すると白点灯になるまで待つ</li><li>工場出荷設定で起動完了</li></ol>
+<p>最初は「本当にLuCIもSSHも入れないか」を確認してから実施するほうが整理しやすくなります。</p>
+<blockquote><p><strong>注意</strong>: ハードリセット後は全設定が消えます。事前にLuCIバックアップを取っておくことを強くおすすめします。</p></blockquote>
+<p>Linksys公式手順でも、MBE70/LN6001系のリセットは本体底面のリセットボタンを約10秒押し、LEDが赤点灯から青点滅へ変わる流れで案内されています。</p>
+<p>初期化後にインターネットを検知すると白点灯になります。赤点灯のままなら、初期化ではなくWAN配線や回線設定を確認します。</p>
+<p>---</p>
+<h2>SSHからのリカバリー（firstbootコマンド）</h2>
+<p>SSHへ入れるなら、まだかなり多くの復旧手段が残っています。</p>
+<pre><code class="language-sh"># 工場出荷設定に戻すコマンド（実行すると全設定が消える）
+sysupgrade -b /tmp/before-firstboot-$(date +%Y%m%d-%H%M).tar.gz
+opkg list-installed &gt; /tmp/opkg-before-firstboot-$(date +%Y%m%d-%H%M).txt
+
+firstboot -y
+reboot now</code></pre>
+<p><code>firstboot</code> は、OpenWrt系でまず覚えておきたい復旧コマンドです。</p>
+<p>ただし、実行すると設定は消えるため、最初はバックアップ確認を優先します。</p>
+<p>管理パスワードを覚えていてSSHに入れる場合は、特定の設定ファイルだけ戻すこともできます:</p>
+<pre><code class="language-sh"># 直前に変更したファイルのバックアップを確認
+ls /etc/config/*.backup.*
+
+# 戻す前に現在のファイルも保存
+cp /etc/config/network /etc/config/network.before-rollback.$(date +%Y%m%d-%H%M)
+cp /etc/config/firewall /etc/config/firewall.before-rollback.$(date +%Y%m%d-%H%M)
+
+# バックアップから特定の設定を復元
+cp /etc/config/network.backup.20260618 /etc/config/network
+/etc/init.d/network restart
+
+# firewallだけ戻す
+cp /etc/config/firewall.backup.20260618 /etc/config/firewall
+/etc/init.d/firewall restart
+
+# 戻した後の確認
+ifstatus lan 2&gt;/dev/null || true
+ifstatus wan 2&gt;/dev/null || true
+logread | tail -n 80</code></pre>
+<p>最初は「networkだけ」「firewallだけ」のように、直前に変更した設定だけ戻すほうが切り分けしやすくなります。</p>
+<p>---</p>
+<h2>LuCIバックアップからの復元</h2>
+<p>バックアップがある場合は、「全部再設定」より復元のほうがかなり速いことがあります。</p>
+<p>バックアップファイル（<code>.tar.gz</code>）がある場合:</p>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Restore backup</strong> セクションで <strong>Browse</strong> をクリック</li><li>バックアップファイル（<code>backup-openwrt-*.tar.gz</code>）を選択して <strong>Upload archive</strong> をクリック</li><li>確認後 <strong>Proceed</strong> をクリック</li><li>ルーターが再起動し、バックアップ時点の設定が復元される</li></ol>
+<p>最初は「LuCIへ戻れるか」を確認できるだけでもかなり重要です。</p>
+<p>SSHから復元する場合:</p>
+<pre><code class="language-sh"># PCからバックアップファイルをルーターにコピー
+scp backup-openwrt-20260507.tar.gz root@192.168.1.1:/tmp/
+
+# SSHでルーターにログインして復元
+ssh root@192.168.1.1
+sysupgrade -r /tmp/backup-openwrt-20260507.tar.gz</code></pre>
+<p><code>sysupgrade -r</code> は、バックアップ復元時にまず覚えておきたいコマンドです。</p>
+<p>---</p>
+<h2>よくある「壊れていないのに入れない」ケース</h2>
+<p>実際には、「壊れた」のではなく、「アクセス先や権限が変わっただけ」のケースもかなり多くあります。</p>
+<table><thead><tr><th>症状</th><th>原因</th><th>対処</th></tr></thead><tbody><tr><td><code>192.168.1.1</code> に接続できない</td><td>LAN IPを変更した</td><td>変更後のIPアドレスでアクセス</td></tr><tr><td>パスワードが通らない</td><td>パスワードを変更した後に忘れた</td><td>ハードリセット実行</td></tr><tr><td>Wi-Fi接続後にLuCIにアクセスできない</td><td>ゲストWi-FiはLuCIへのアクセスをブロック</td><td>有線LANで接続し直す</td></tr><tr><td>ログインできるがWeb画面が表示されない</td><td>LuCIパッケージが壊れている</td><td>SSHからlighttpd再起動</td></tr></tbody></table>
+<pre><code class="language-sh"># LuCIのWebサーバー（uhttpd）を再起動
+/etc/init.d/uhttpd restart
+
+# uhttpdとSSHの状態確認
+/etc/init.d/uhttpd status
+/etc/init.d/dropbear status
+
+# ルーター自身のLAN IPを確認
+uci show network.lan</code></pre>
+<p>最初は「LuCI自体が止まっていないか」を見るだけでもかなり役立ちます。</p>
+<p>---</p>
+<h2>初期化後の再設定チェックリスト</h2>
+<p>初期化前の成功条件としては、次の3つを見れば十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>LuCIかSSHのどちらかへまだ入れる</li><li>直前に変更した設定の見当がついている</li><li>バックアップか再設定材料が残っている</li></ul>
+<p>ハードリセット後は、「普段使う機能から順番に戻す」ほうが整理しやすくなります。</p>
+<p>ハードリセット後に必要な再設定項目:</p>
+<ol><li>[ ] 管理者パスワードを設定</li><li>[ ] ホスト名・タイムゾーンを設定（Asia/Tokyo）</li><li>[ ] SSIDとWi-Fiパスワードを設定</li><li>[ ] WANの回線種別を設定（IPoE/PPPoE等）</li><li>[ ] LAN IPアドレスを設定（HGW配下の場合は変更必須）</li><li>[ ] ゲストWi-Fi・Kids/IoTネットワークを再作成</li><li>[ ] DHCP固定割り当てを再登録</li><li>[ ] VPN（WireGuard/Tailscale）を再設定</li><li>[ ] opkgでインストールしたパッケージを再インストール（adblock等）</li><li>[ ] IPoEモジュールを再インストール（必要な場合）</li></ol>
+<p>最初は「WAN」「Wi‑Fi」「普段使う端末」が戻ることを優先確認すると整理しやすくなります。</p>
+<p>設定の詳細は各記事（Article 004: 初期セットアップ、Article 007: ゲストWi-Fi等）を参照してください。</p>
+<p>---</p>
+<h2>まとめ</h2>
+<ol><li>まず有線LAN接続でLuCIやSSHへ入れるか確認する</li><li>最後に変更した設定（LAN IP、firewall、VLAN等）を思い出す</li><li>バックアップファイルがあるか確認する</li><li>LuCIやSSHから戻せるなら、部分復元を先に試す</li><li>それでも戻せない場合だけハードリセットを検討する</li><li>リセット後はWAN・Wi‑Fi・普段使う機能から順番に戻す</li></ol>
+<p>「壊れたからすぐ初期化」ではなく、「まだ戻せる余地があるか」を確認するだけでも、かなり安全に復旧しやすくなります。</p>
+<p>特にLAN IP変更やfirewall設定変更は、「実はルーター自体は正常」なケースもかなり多くあります。</p>
+<p>バックアップを定期的に残しておくと、復旧時間を大幅に短縮できます。</p>
+<figure><img src="/blog/openwrt/assets/022/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPがおかしい時、すぐリセットしたほうがいい？</h3>
+<p>すぐに押すより、有線LAN、LuCI、SSHで戻せないかを先に確認するほうが安全です。</p>
+<p>バックアップがあるなら、復元のほうが早いこともあります。</p>
+<h3>ソフトリセットとハードリセットは何が違う？</h3>
+<p>どちらも最終的には初期化ですが、LuCIやSSHから操作できるなら状況確認やバックアップの余地が残ります。</p>
+<p>物理ボタンは最後の手段として考えるほうが安全です。</p>
+<h3>LN6001-JPをリセットした後は何からやり直す？</h3>
+<p>まず004の初期設定手順に戻り、管理パスワード、SSID、WAN確認の順で整えると戻しやすくなります。</p>
+<p>最初は「インターネットへ出られる状態」を優先確認すると整理しやすいです。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys MBE70 reset: https://support.linksys.com/kb/article/220-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

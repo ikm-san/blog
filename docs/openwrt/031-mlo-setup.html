@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n00750e23f49c">MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】</a></p></blockquote>
+<h1>MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>MLO（Multi-Link Operation）は、Wi‑Fi 7の目玉機能の1つで、2.4GHz・5GHz・6GHzの複数バンドを同時利用する技術です。</p>
+<p>通信速度向上だけでなく、遅延低減や接続安定性改善も期待できます。</p>
+<p>ただし、最初から「絶対にMLOを使うべき」と考えなくても大丈夫です。</p>
+<p>まずは「Wi‑Fi 7端末があるか」「5GHzが安定しているか」「通常SSID運用でも困っていないか」を確認するだけでも、かなり整理しやすくなります。</p>
+<p>この記事では、LN6001-JPでMLOを有効化する条件、通常SSIDとの違い、MLOを無理に使わなくてもよいケースを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/031/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>MLOが通常Wi‑Fi接続とどう違うか</li><li>LN6001-JPでMLOを有効化する条件</li><li>MLOを試すべきケースと無理に使わなくてもよいケース</li><li>MLO確認時に見たいポイント</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>Wi‑Fi 7対応端末を持っていてMLOを試したい</li><li>6GHzを含めた構成をどうそろえるか知りたい</li><li>MLOを使うべきか通常SSID運用で十分か迷っている</li></ul>
+<figure><img src="/blog/openwrt/assets/031/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>MLOは必須機能ではありません。</p>
+<p>まずは次の3つで十分です。</p>
+<ol><li>ルーターと端末が両方ともWi‑Fi 7対応か確認する</li><li>全帯域でSSID、パスワード、WPA3-SAEをそろえる</li><li>効果が薄ければ通常SSID運用へ戻せる前提で試す</li></ol>
+<p>MLOは、「使えたら便利」くらいで考えるほうが無理なく判断しやすくなります。</p>
+<p>最初は、「理論最大速度」より、「複数バンドをまとめて安定利用できる技術」と考えるほうが整理しやすくなります。</p>
+<h2>MLOとは</h2>
+<table><thead><tr><th>項目</th><th>従来のバンドステアリング</th><th>MLO（Wi-Fi 7）</th></tr></thead><tbody><tr><td>バンド切り替え</td><td>どれか1つのバンドを使用</td><td>複数バンドを同時使用</td></tr><tr><td>遅延</td><td>切り替え時に遅延が発生</td><td>複数リンクで冗長性・低遅延</td></tr><tr><td>速度</td><td>1バンドの最大速度</td><td>複数バンドの合算に近い速度</td></tr><tr><td>要件</td><td>なし</td><td>端末・ルーター両方がWi‑Fi 7対応必要</td></tr></tbody></table>
+<p>MLOの恩恵を受けるには、次が必要です:</p>
+<ol><li>LN6001-JP（ルーター側）: ファームウェア1.2.0.15以降</li><li>接続端末: Wi‑Fi 7（IEEE 802.11be）対応スマートフォン・PCが必要</li></ol>
+<p>Wi-Fi 7非対応端末は従来どおり1バンドで接続します（MLOにはならないが通常通り使える）。</p>
+<p>最初は、「Wi‑Fi 7対応 = 必ずMLO対応」ではない点だけ理解できればかなり役立ちます。</p>
+<p>MLOでは、「全部同じ設定へそろえる」ことがかなり重要です。</p>
+<h2>MLOのための設定方針</h2>
+<p>MLOを使うには、次の条件をそろえる必要があります:</p>
+<ul><li>全バンド（2.4GHz/5GHz/6GHz）に <strong>同じSSID</strong> を設定</li><li>全バンドに <strong>同じパスワード</strong> を設定</li><li>暗号化方式を <strong>WPA3-SAE</strong> に統一（WPA2では動作しない場合あり）</li></ul>
+<p>最初は、「SSID」「暗号化」「パスワード」の3つをそろえることを優先するだけでも十分です。</p>
+<blockquote><p><strong>重要</strong>: 電波出力・チャンネル・国コードなどの無線設定は、最初は変更しないほうが安全です。</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>まずは標準状態でMLO動作確認するほうが切り分けしやすくなります。</p></blockquote>
+<p>MLO設定は、最初はLuCIからそろえるほうが整理しやすくなります。</p>
+<p>変更前に現在の無線設定を保存しておきます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/mlo-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+cp /etc/config/wireless &quot;$BACKUP_DIR/wireless&quot;
+cp /etc/config/network &quot;$BACKUP_DIR/network&quot;
+uci show wireless &gt; &quot;$BACKUP_DIR/wireless.uci.txt&quot;
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status-before.json&quot; 2&gt;/dev/null || true
+iw dev &gt; &quot;$BACKUP_DIR/iw-dev-before.txt&quot; 2&gt;/dev/null || true</code></pre>
+<h2>LuCIでのMLO設定手順</h2>
+<h3>2.4GHzバンドの設定</h3>
+<ol><li>LuCI: <strong>Network</strong> → <strong>Wireless</strong> を開く</li><li><code>radio0</code>（2.4GHz）の行にある既存SSIDの <strong>Edit</strong> をクリック</li><li><strong>Interface Configuration</strong> タブで設定:</li></ol>
+<table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>ESSID（SSID）</td><td>HomeWifi（全バンド共通）</td></tr><tr><td>Encryption</td><td>WPA3-SAE</td></tr><tr><td>Key</td><td>共通パスワード（12文字以上推奨）</td></tr><tr><td>Network</td><td>lan</td></tr></tbody></table>
+<ol><li><strong>Save</strong> → 次のバンドへ</li></ol>
+<p>最初は、「2.4GHzだけ別SSIDになっていないか」を確認するだけでもかなり役立ちます。</p>
+<h3>5GHzバンドの設定</h3>
+<ol><li><code>radio1</code>（5GHz）の行にある既存SSIDの <strong>Edit</strong> をクリック</li><li>同様に SSID: <code>HomeWifi</code>、Encryption: WPA3-SAE、同じKey を入力</li><li>Network: <code>lan</code></li><li><strong>Save</strong></li></ol>
+<p>5GHzは、実際にはMLOの主力帯域になるケースがかなり多くあります。</p>
+<h3>6GHzバンドの設定</h3>
+<ol><li><code>radio2</code>（6GHz）の行にある既存SSIDの <strong>Edit</strong> をクリック</li><li>同様に SSID: <code>HomeWifi</code>、Encryption: WPA3-SAE、同じKey を入力</li><li>Network: <code>lan</code></li><li><strong>Save</strong> → <strong>Apply</strong></li></ol>
+<p>6GHzは高速ですが、距離や障害物には比較的弱めです。</p>
+<p>SSID・暗号化・キーをそろえたあとでMLOを有効化するほうが整理しやすくなります。</p>
+<h3>MLOを有効化する</h3>
+<ol><li>有線LANでPCをLN6001-JPに接続する</li><li>LuCIにログインする</li><li><strong>Network</strong> → <strong>MLO</strong> を開く</li><li><strong>AP MLO Enable</strong> にチェックを入れる</li><li><strong>Save &amp; Apply</strong> をクリック</li></ol>
+<p>最初は、有線LAN接続したPCから設定するほうが安全です。</p>
+<p>CLIでは、最初は「設定変更」より「現在状態確認」を優先するほうが安全です。</p>
+<pre><code class="language-sh"># 現在のSSID設定を確認
+uci show wireless | grep ssid
+
+# 暗号化方式を確認
+uci show wireless | grep encryption
+
+# 各SSIDがどのnetworkに紐づいているか確認
+uci show wireless | grep network
+
+# 無線デバイスとSSIDの状態を確認
+wifi status</code></pre>
+<p><code>wifi status</code> は、まず最初に確認したいコマンドです。</p>
+<p>最初は「SSIDがそろっているか」を見るだけでもかなり役立ちます。</p>
+<p><code>wireless.default_radio0</code> のようなセクション名は環境ごとに変わることがあります。</p>
+<p>コピペで <code>uci set</code> を実行せず、LuCIのWireless画面で各バンドを確認してから変更するほうが安全です。</p>
+<p>MLOは、「設定しただけ」で終わりではなく、実際に端末側が使えているか確認することも重要です。</p>
+<h2>MLO動作の確認方法</h2>
+<h3>端末側での確認（iPhone/Android）</h3>
+<p>Wi-Fi 7対応端末でSSIDに接続後、Wi-Fi接続の詳細情報でリンク速度や使用バンドを確認します。</p>
+<ul><li><strong>iPhone（Wi-Fi 7対応機種）</strong>: 設定 → Wi-Fi → 接続済みSSID名の「i」ボタン → リンク速度・使用バンドを確認</li><li><strong>Mac</strong>: Option + Wi‑Fiアイコン → 接続情報でPHYモードが「802.11be」であることを確認</li></ul>
+<h3>ルーター側での確認</h3>
+<p>LuCIでは <strong>Network</strong> → <strong>Wireless</strong> の <strong>Associated Stations</strong> で、端末が2つまたは3つのradioに接続しているかを確認します。複数radioに表示されても、実際にTX/RXレートが出るactive radioは端末や電波状況により変わります。</p>
+<pre><code class="language-sh"># 各バンドの接続状態を確認
+wifi status
+
+# MLO設定らしき項目が反映されているか確認
+uci show wireless | grep -Ei &#x27;mlo|ssid|encryption|key&#x27;
+
+# 接続中の端末と使用バンドを確認
+# 実際のwlan名は iw dev で確認
+iw dev
+iw dev &lt;wlan名&gt; station dump
+
+# ログ確認
+logread | grep -Ei &#x27;wifi|hostapd|mlo&#x27; | tail -n 100</code></pre>
+<p>最初は、「複数radioへ接続が見えるか」を確認できれば十分役立ちます。</p>
+<p>MLOは比較的新しい機能のため、「Wi‑Fi 7対応」と書かれていても挙動差が出ることがあります。</p>
+<p>うまくいかない時は、まずMLOを疑うより、通常Wi-Fiとして安定しているかを確認します。</p>
+<pre><code class="language-sh"># SSID、暗号化、keyが全バンドで一致しているか確認
+uci show wireless | grep -E &#x27;ssid|encryption|key&#x27;
+
+# 一時的にMLOを無効化する場合はLuCIの Network &gt; MLO から戻す
+# その後、Wi-Fiを再読み込み
+wifi reload
+logread | grep -Ei &#x27;wifi|hostapd&#x27; | tail -n 80</code></pre>
+<h2>よくある問題</h2>
+<table><thead><tr><th>症状</th><th>確認事項</th></tr></thead><tbody><tr><td>Wi-Fi 7端末だが速度が改善しない</td><td>端末がMLO対応しているか確認（Wi-Fi 7対応でもMLO非対応モデルあり）</td></tr><tr><td>6GHz帯に接続できない</td><td>端末が6GHz対応しているか確認（Wi-Fi 6Eまたは7が必要）</td></tr><tr><td>WPA3-SAEに設定したら古い端末が繋がらない</td><td>WPA2-PSK / WPA3-SAE mixedモードを使うか、古い端末用に別SSIDを作る</td></tr><tr><td>SSIDが3つ見える</td><td>全バンドで同じSSIDを設定できていない → 手順を再確認</td></tr></tbody></table>
+<p>最初は、「MLOが動かない」より、「通常Wi‑Fiとして安定動作するか」を優先確認するほうが整理しやすくなります。</p>
+<p>MLOでは、「全部の帯域が常に最大速度」になるわけではありません。</p>
+<h2>帯域幅と対応チャンネルの目安</h2>
+<table><thead><tr><th>バンド</th><th>最大チャンネル幅</th><th>MLO時の役割</th></tr></thead><tbody><tr><td>2.4GHz</td><td>40MHz</td><td>障害物を超える安定リンク（補助）</td></tr><tr><td>5GHz</td><td>160MHz</td><td>バランスリンク（主力）</td></tr><tr><td>6GHz</td><td>320MHz</td><td>超高速・低遅延リンク（高速）</td></tr></tbody></table>
+<p>電波の強さや端末の位置によって、MLO時の実際のリンク組み合わせは自動的に最適化されます。</p>
+<p>最初は、「5GHz主体 + 必要に応じて6GHz追加」くらいで考えるほうが現実的です。</p>
+<h2>まとめ</h2>
+<p>MLOは、Wi‑Fi 7環境で複数バンドをまとめて使える便利な機能です。</p>
+<p>ただし、必須ではなく、「通常SSID運用で十分安定している」なら無理に使わなくても問題ありません。</p>
+<p>まずはSSID・WPA3-SAE・パスワードを全帯域でそろえ、LuCIから安全に試すほうが整理しやすくなります。</p>
+<p>最初は、「Wi‑Fi 7端末が普通に安定接続できる」だけでも十分価値があります。</p>
+<figure><img src="/blog/openwrt/assets/031/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのMLOは有効にすると必ず速くなる？</h3>
+<p>必ずしもそうではありません。</p>
+<p>ルーターと端末の両方がWi‑Fi 7とMLOへ対応していて、環境条件も合って初めて効果を感じやすくなります。</p>
+<h3>LN6001-JPでMLOを使うにはSSIDをどう設定すればいい？</h3>
+<p>2.4GHz、5GHz、6GHzの3帯域すべてで、同じSSID、同じパスワード、同じWPA3-SAE設定へそろえる必要があります。</p>
+<h3>LN6001-JPでMLOを有効にすると古い端末はつながらなくなる？</h3>
+<p>古い端末はMLOにはなりませんが、通常Wi‑Fi接続として使えることが多いです。</p>
+<p>ただし、WPA3-SAEとの相性は確認が必要です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT MLO setup: https://support.linksys.com/kb/article/8652-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

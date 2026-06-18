@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/nff6b598da354">ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】</a></p></blockquote>
+<h1>ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>OpenWrtベースのLN6001-JPでは、設定自由度が高いぶん、ファームウェア更新前のバックアップがかなり重要です。</p>
+<p>特にIPoE、VLAN、VPN、DHCP予約などを使っている場合は、「更新後に何を確認するか」を先に決めておくだけでも、トラブル時の切り分けがかなり楽になります。</p>
+<p>ただし、最初から全部を細かく確認しなくても大丈夫です。</p>
+<p>まずは「バックアップを取る」「有線で更新する」「WANとWi‑Fiが戻ることを確認する」だけでも、かなり安全に進められます。</p>
+<p>この記事では、LN6001-JPのファームウェア更新前後に確認したいポイント、バックアップの考え方、追加パッケージや設定が消えた時の戻し方を、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/020/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JP更新前に何をバックアップするべきか</li><li>更新後にどこを確認すると切り分けしやすいか</li><li>追加パッケージやIPoE設定が消えた時の戻し方</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>LN6001-JPを長く使う前提で、安全に更新したい</li><li>更新後にWi‑FiやVPNが壊れないか不安</li><li>バックアップからどこまで戻せるのか知っておきたい</li></ul>
+<figure><img src="/blog/openwrt/assets/020/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>更新前後で全部を細かく見なくても、まずは次の3つを押さえれば十分です。</p>
+<p>最初は「安全に戻せる状態を作る」ことを優先します。</p>
+<ol><li>バックアップを PC 側へ保存する</li><li>有線接続で更新する</li><li>更新後は WAN、Wi-Fi、追加パッケージの3点を確認する</li></ol>
+<p>特に更新前バックアップがあるだけで、失敗時の戻しやすさはかなり変わります。</p>
+<p>最初は「全部理解してから更新」より、「戻せる状態を作ってから更新」のほうが安全です。</p>
+<p>更新前は、「今どのバージョンなのか」を残しておくことも重要です。</p>
+<p>あとから「どの更新で問題が起きたか」を追いやすくなります。</p>
+<h2>ファームウェアバージョンの確認</h2>
+<h3>LuCIで確認</h3>
+<ol><li><strong>System</strong> → <strong>Software</strong> を開く</li><li>「Installed packages」で <code>kernel</code> パッケージのバージョンを確認</li><li>または <strong>Status</strong> → <strong>Overview</strong> の「Firmware Version」を確認</li></ol>
+<h3>CLIで確認</h3>
+<pre><code class="language-sh"># ルーターの基本情報（モデルとファームウェアバージョンを含む）
+ubus call system board
+
+# 更新前の稼働状態も保存しておく
+uptime
+df -h
+opkg list-installed | grep -E &#x27;base-files|kernel|busybox|dnsmasq|firewall|dropbear|uhttpd&#x27;</code></pre>
+<p><code>ubus call system board</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「現在状態を記録する」用途で使うくらいでも十分です。</p>
+<p>OpenWrt系では、「更新できること」より、「戻せること」のほうがかなり重要です。</p>
+<h2>更新前: バックアップを取る</h2>
+<h3>LuCIでバックアップする（推奨）</h3>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Backup</strong> セクション → <strong>Generate archive</strong> をクリック</li><li><code>backup-OpenWrt-日付.tar.gz</code> をダウンロードして保存する</li></ol>
+<p>このファイルには、<code>/etc/config/</code> 配下の主要設定ファイルが含まれます。</p>
+<p>最初はLuCIバックアップだけでも十分役立ちます。</p>
+<h3>CLIでバックアップする</h3>
+<pre><code class="language-sh"># 設定ファイルと状態をまとめてバックアップ
+BACKUP_DIR=&quot;/root/firmware-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+sysupgrade -b &quot;$BACKUP_DIR/config-backup.tar.gz&quot;
+
+for cfg in network wireless firewall dhcp system dropbear; do
+  [ -f &quot;/etc/config/$cfg&quot; ] &amp;&amp; cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot; 2&gt;/dev/null || true
+done
+
+# インストール済みパッケージ一覧を保存
+opkg list-installed &gt; &quot;$BACKUP_DIR/packages-before-update.txt&quot;
+
+# ネットワーク設定のスナップショットを保存
+ubus call system board &gt; &quot;$BACKUP_DIR/system-board-before.json&quot;
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan-before.json&quot; 2&gt;/dev/null || true
+ifstatus wan6 &gt; &quot;$BACKUP_DIR/ifstatus-wan6-before.json&quot; 2&gt;/dev/null || true
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status-before.json&quot; 2&gt;/dev/null || true
+logread | tail -n 200 &gt; &quot;$BACKUP_DIR/logread-before.txt&quot;
+
+echo &quot;backup: $BACKUP_DIR&quot;</code></pre>
+<p>最初は「network」「wireless」「firewall」「dhcp」の4つだけ保存するだけでもかなり安心感が変わります。</p>
+<p>バックアップファイルはLN6001-JPの中だけでなく、PC側にもダウンロードして保管します（SCPまたはLuCIバックアップ機能を使用）:</p>
+<pre><code class="language-sh"># PCからSCPでバックアップファイルを取得する（PCのターミナルで実行）
+scp -r root@192.168.1.1:/root/firmware-before-* ~/Desktop/</code></pre>
+<p>ルーター内部だけへ保存していると、本体故障時に取り出せなくなることがあります。</p>
+<p>ファームウェアは、必ず機種に合ったものを使用します。</p>
+<h2>ファームウェアの入手</h2>
+<p>Linksys公式サポートサイトからファームウェアファイルを取得します:</p>
+<ol><li>https://support.linksys.com/kb/article/6274-jp/ にアクセス</li><li>最新のファームウェアダウンロードリンクを確認</li><li><code>.img</code> または <code>.bin</code> ファイルをダウンロード</li></ol>
+<p><strong>注意:</strong> ファームウェアはLinksys公式サポートサイトのダウンロードリンクから取得します。</p>
+<p>別サイトから入手したファイルや、機種違いのファームウェアは使いません。</p>
+<p>最初はCLI更新より、LuCIから進めるほうが状態を確認しやすくなります。</p>
+<h2>ファームウェアの更新手順（LuCI）</h2>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Flash image</strong> をクリック</li><li><strong>Browse...</strong> でダウンロードしたファームウェアファイルを選択</li><li><strong>Upload</strong> をクリック</li><li>更新が完了し、ルーターが再起動するまで電源を切らずに待つ</li><li>LEDが青点滅から白点灯、または更新前の状態に戻るまで待つ</li><li>必要に応じてSSIDへ再接続し、<strong>Status</strong> ページでFirmware Versionを確認する</li></ol>
+<p>更新中は、電源断やブラウザ操作をできるだけ避けます。</p>
+<p>特にWi‑Fi接続だけで更新すると、途中で切断された際に状態を追いにくくなります。</p>
+<p><strong>警告:</strong> 更新中にインターネット接続が不安定になる場合があります。</p>
+<p>有線LAN接続で作業することを強くおすすめします。</p>
+<p>CLI更新は、SSHやOpenWrt構成に慣れている場合向けです。</p>
+<p>最初はLuCI更新だけでも十分です。</p>
+<h2>ファームウェアの更新手順（CLI）</h2>
+<pre><code class="language-sh"># ファームウェアファイルをルーターに転送する（PCのターミナルで実行）
+scp firmware-linksys-ln6001.img root@192.168.1.1:/tmp/
+
+# ルーターのSSHで実行
+# バックアップが完了していることを確認
+ls -la /root/firmware-before-*
+
+# 可能ならファームウェアのハッシュを控える
+sha256sum /tmp/firmware-linksys-ln6001.img
+
+# ファームウェアを書き込む（設定を保持する場合）
+sysupgrade -v /tmp/firmware-linksys-ln6001.img
+
+# 設定を保持せずにクリーンインストールする場合
+# sysupgrade -n /tmp/firmware-linksys-ln6001.img</code></pre>
+<p><code>sysupgrade</code> は、OpenWrt系更新でまず覚えておきたいコマンドです。</p>
+<p><code>sysupgrade</code> 実行後はルーターが自動的に再起動します。</p>
+<p>SSH接続は切断されるため、再接続できるまで数分待ちます。</p>
+<p>更新後は、「全部を細かく確認する」より、「普段使う機能が戻っているか」を優先して確認するほうが整理しやすくなります。</p>
+<h2>更新後のチェックリスト</h2>
+<p>ルーターが再起動したら（約3〜5分後）、以下の順番で確認します:</p>
+<h3>1. 管理画面へのアクセス確認</h3>
+<p><code>https://192.168.1.1</code> でLuCI管理画面にアクセスできるか確認します。</p>
+<p>最初は「管理画面へ戻れるか」を確認できるだけでもかなり重要です。</p>
+<h3>2. WAN/WAN6の接続確認</h3>
+<pre><code class="language-sh">ifstatus wan | grep -E &#x27;&quot;up&quot;|&quot;ipaddr&quot;&#x27;
+ifstatus wan6 | grep -E &#x27;&quot;up&quot;|&quot;ip6addr&quot;&#x27;
+ip route show
+ip -6 route show</code></pre>
+<p>LuCI: <strong>Status</strong> → <strong>Overview</strong> でWAN/WAN6が接続済みか確認。</p>
+<p>IPoE環境では、「WANは正常だがWAN6だけ落ちている」ケースもあります。</p>
+<p><code>ifstatus wan</code> と <code>ifstatus wan6</code> を分けて見ると切り分けしやすくなります。</p>
+<h3>3. Wi-Fiの確認</h3>
+<p>LuCI: <strong>Network</strong> → <strong>Wireless</strong> で設定したSSIDが存在するか確認します。</p>
+<p>端末から接続テストも実施します。</p>
+<pre><code class="language-sh">uci show wireless | grep -E &#x27;ssid|encryption|disabled&#x27;
+wifi status
+iw dev</code></pre>
+<h3>4. 追加パッケージの確認</h3>
+<pre><code class="language-sh"># 更新前後のパッケージを比較
+opkg list-installed &gt; /tmp/packages-after-update.txt
+diff /root/firmware-before-YYYYMMDD-HHMM/packages-before-update.txt /tmp/packages-after-update.txt</code></pre>
+<p>最初は「Adblock」「VPN」「IPoE関連」が残っているかを見るだけでも十分です。</p>
+<h3>5. IPoE設定の確認</h3>
+<p>IPoE（オートIPoEモジュール）を使っている場合:</p>
+<pre><code class="language-sh">opkg list-installed | grep -i ipoe
+ifstatus wan | grep &#x27;&quot;ipaddr&quot;&#x27;
+ifstatus wan6 | grep -E &#x27;&quot;ip6addr&quot;|&quot;ip6prefix&quot;&#x27;</code></pre>
+<p>モジュールが消えた場合は再インストールが必要です（https://support.linksys.com/kb/article/6902-jp/）。</p>
+<p>特にIPoE環境では、「IPv4 over IPv6側だけ戻っていない」ケースもあります。</p>
+<h3>6. VPN設定の確認</h3>
+<pre><code class="language-sh">opkg list-installed | grep -E &#x27;wireguard|tailscale&#x27;
+wg show         # WireGuardの場合
+tailscale status # Tailscaleの場合
+logread | grep -Ei &#x27;wireguard|tailscale|vpn&#x27; | tail -n 80</code></pre>
+<p>最初は「VPNへ再接続できるか」を確認できれば十分です。</p>
+<h3>7. DHCP予約の確認</h3>
+<pre><code class="language-sh">uci show dhcp | grep &#x27;@host&#x27;
+cat /tmp/dhcp.leases</code></pre>
+<p>予約が失われた場合はバックアップから復元:</p>
+<pre><code class="language-sh">cp /etc/config/dhcp.backup.YYYYMMDD /etc/config/dhcp
+/etc/init.d/dnsmasq restart</code></pre>
+<p>DHCP予約が消えると、NASやプリンターIPが変わってしまうことがあります。</p>
+<p>更新後は、「普段使うものから順番に戻っているか」を確認するほうが整理しやすくなります。</p>
+<h2>更新後チェックリスト（まとめ）</h2>
+<table><thead><tr><th>確認項目</th><th>方法</th><th>状態</th></tr></thead><tbody><tr><td>管理画面アクセス</td><td>https://192.168.1.1</td><td>□</td></tr><tr><td>WAN接続</td><td><code>ifstatus wan</code></td><td>□</td></tr><tr><td>WAN6接続</td><td><code>ifstatus wan6</code></td><td>□</td></tr><tr><td>Wi-Fi SSID</td><td>Network &gt; Wireless</td><td>□</td></tr><tr><td>IPoEモジュール</td><td><code>opkg list-installed | grep ipoe</code></td><td>□</td></tr><tr><td>VPNパッケージ</td><td><code>opkg list-installed | grep wireguard</code></td><td>□</td></tr><tr><td>DHCP予約</td><td><code>uci show dhcp | grep host</code></td><td>□</td></tr><tr><td>firewall設定</td><td><code>uci show firewall</code></td><td>□</td></tr></tbody></table>
+<p>更新失敗時も、バックアップが残っていればかなり復旧しやすくなります。</p>
+<h2>更新に失敗した場合</h2>
+<p>設定を保持しない更新（<code>-n</code>オプション）や工場出荷状態リセット後は、設定を全て再入力する必要があります。バックアップを使って復元します:</p>
+<pre><code class="language-sh"># バックアップファイルをルーターに転送
+scp backup-OpenWrt-20260507.tar.gz root@192.168.1.1:/tmp/
+
+# 設定を復元
+sysupgrade -r /tmp/backup-OpenWrt-20260507.tar.gz
+reboot</code></pre>
+<p>または LuCI: <strong>System</strong> → <strong>Backup / Flash Firmware</strong> → <strong>Restore backup</strong> で tar.gz ファイルをアップロードして復元します。</p>
+<p>最初は「LuCIへ戻れるか」を優先確認すると切り分けしやすくなります。</p>
+<h2>まとめ</h2>
+<p>更新後は、次の3つが確認できれば最初の安全確認として十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>WAN が上がり、通常のインターネット接続が使える</li><li>Wi-Fi で普段使う端末が再接続できる</li><li>追加パッケージや DHCP 予約、VPN が想定どおり残っている</li></ul>
+<p>更新前バックアップが最大の安全策です。</p>
+<p>作業は有線LAN接続状態で、できれば業務外時間帯に実施します。</p>
+<p>最初から全部を細かく確認するより、「WAN」「Wi‑Fi」「普段使う機能」が戻っていることを優先確認するほうが整理しやすくなります。</p>
+<figure><img src="/blog/openwrt/assets/020/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのファームウェア更新前に必ずやることは？</h3>
+<p>設定バックアップの取得です。</p>
+<p>更新前後の確認項目もメモしておくと戻しやすくなります。</p>
+<h3>LN6001-JPのアップデート後に追加パッケージは残る？</h3>
+<p>残らないことがあります。</p>
+<p><code>opkg list-installed</code> を別に保存しておくと再インストールがしやすくなります。</p>
+<h3>LN6001-JPの更新作業はWi-Fi接続でもできる？</h3>
+<p>できなくはありませんが、有線LAN接続のほうが安全です。</p>
+<p>更新中に無線が切れると作業しにくくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT firmware update: https://support.linksys.com/kb/article/227-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

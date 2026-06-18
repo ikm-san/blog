@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n765ffea6ea82">ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】</a></p></blockquote>
+<h1>ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>ポート開放は、インターネット側からLAN内機器へ入口を作る設定です。</p>
+<p>NAS、監視カメラ、ゲームサーバーなどを外部公開する時に使われますが、設定を誤ると意図しない通信を許可するリスクがあります。</p>
+<p>ただし、最初から「ポート開放は危険だから全部禁止」と考えなくても大丈夫です。</p>
+<p>まずは「本当に公開が必要なのか」「VPNで代替できないか」を整理するだけでも、かなり安全性は変わります。</p>
+<p>LN6001-JPでは、LuCIの <strong>Network</strong> → <strong>Firewall</strong> → <strong>Port Forwards</strong> からポートフォワーディングを設定できます。</p>
+<p>この記事では、ポート開放が必要になるケース、VPNへ置き換えたほうがよいケース、公開前に最低限確認したいポイントを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/017/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>ポート開放が本当に必要かどうかの考え方</li><li>LN6001-JPで公開前に確認したいポイント</li><li>VPNで置き換えたほうがよいケース</li><li>公開範囲を最小限へ絞る考え方</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>NASやカメラを外から見たいが、公開してよいか不安</li><li>ポート開放とVPNのどちらを選ぶべきか迷っている</li><li>公開前に最低限のリスクを把握したい</li></ul>
+<figure><img src="/blog/openwrt/assets/017/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>ポート開放も、最初から複雑に考えなくて大丈夫です。</p>
+<p>まずは次の3つを確認するだけでも、かなり判断しやすくなります。</p>
+<ol><li>VPNで代替できないか考える</li><li>公開先機器のIPを固定する</li><li>開ける範囲を最小限へ絞る</li></ol>
+<p>「設定できるか」より、「本当に公開が必要か」を先に考えるほうが安全です。</p>
+<p>特に「自分だけが使う」用途なら、VPNのほうが整理しやすいこともかなり多くあります。</p>
+<h2>ポート開放が必要かどうかをまず判断する</h2>
+<p>ポートを開ける前に、まず代替手段がないか確認します。</p>
+<p>最初は「インターネットへ直接公開しなくても済むか」を考えるだけでもかなり重要です。</p>
+<table><thead><tr><th>用途</th><th>ポート開放</th><th>VPN代替</th></tr></thead><tbody><tr><td>自分だけがNASにアクセス</td><td>可能だがリスクあり</td><td><strong>VPN推奨</strong></td></tr><tr><td>家族だけがカメラを見る</td><td>可能だがリスクあり</td><td><strong>VPN推奨</strong></td></tr><tr><td>ゲームサーバーを外部公開</td><td>必要な場合あり</td><td>VPNでは代替不可な場合も</td></tr><tr><td>業務システムの要件</td><td>要件に従う</td><td>VPNと組み合わせる場合も</td></tr><tr><td>リモートデスクトップ（管理のみ）</td><td><strong>推奨しない</strong></td><td><strong>VPN必須</strong></td></tr></tbody></table>
+<p>特に管理画面系（RDP、NAS管理UI、ルーター設定画面）は、直接公開しないほうが安全です。</p>
+<p>「外から自分だけアクセスしたい」なら、まずVPNを優先したほうが安全です（Article 013参照）。</p>
+<p>ポート開放は、「不特定端末から直接アクセスされる前提」になることを意識しておく必要があります。</p>
+<p>それでもポート開放が必要な場合は、「公開範囲をできるだけ小さくする」方向で設計します。</p>
+<h2>ポートフォワーディングの設定手順（LuCI）</h2>
+<h3>事前準備: 公開先機器のIPを固定する</h3>
+<p>ポートフォワーディングの転送先IPが変わると動作しなくなります。</p>
+<p>事前にDHCP予約で固定します（Article 012参照）。</p>
+<pre><code class="language-sh"># 公開先機器のIPを確認
+cat /tmp/dhcp.leases
+# 例: NAS → 192.168.1.10 に固定済みであることを確認</code></pre>
+<p>最初は「公開対象機器だけ固定IP化する」くらいで十分です。</p>
+<h3>事前準備: 回線と既存ルールを確認する</h3>
+<p>公開前に、WAN側の状態、WAN6側の状態、既存のポート転送を確認します。</p>
+<pre><code class="language-sh"># WAN / WAN6の状態確認
+ifstatus wan | grep -E &#x27;&quot;up&quot;|&quot;ipaddr&quot;|&quot;proto&quot;&#x27;
+ifstatus wan6 | grep -E &#x27;&quot;up&quot;|&quot;ip6addr&quot;|&quot;ip6prefix&quot;|&quot;proto&quot;&#x27;
+
+# 既存のポート転送を確認
+uci show firewall | grep redirect
+
+# 念のため現在設定を保存
+BACKUP_DIR=&quot;/root/port-forward-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+cp /etc/config/firewall &quot;$BACKUP_DIR/firewall&quot;
+cp /etc/config/network &quot;$BACKUP_DIR/network&quot;
+cp /etc/config/dhcp &quot;$BACKUP_DIR/dhcp&quot;
+uci show firewall &gt; &quot;$BACKUP_DIR/uci-firewall.txt&quot;</code></pre>
+<p>IPoEやIPv4 over IPv6の環境では、WAN6が正常でもIPv4の外部着信条件が別に制限される場合があります。</p>
+<p>「LAN内から見える」ことと「インターネット側から着信できる」ことは別なので、公開前に分けて確認します。</p>
+<h3>ステップ1: Port Forwardsを開く</h3>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Port Forwards</strong> タブを開く</li><li><strong>Add</strong> をクリック</li></ol>
+<h3>ステップ2: 転送ルールを設定する</h3>
+<table><thead><tr><th>フィールド</th><th>値（NAS HTTPS公開の例）</th></tr></thead><tbody><tr><td>Name</td><td><code>NAS-HTTPS</code></td></tr><tr><td>Protocol</td><td><code>TCP</code></td></tr><tr><td>Source zone</td><td><code>wan</code></td></tr><tr><td>External port</td><td><code>8443</code>（インターネット側でアクセスするポート）</td></tr><tr><td>Destination zone</td><td><code>lan</code></td></tr><tr><td>Internal IP address</td><td><code>192.168.1.10</code>（NASのIPアドレス）</td></tr><tr><td>Internal port</td><td><code>443</code>（NASのHTTPSポート）</td></tr></tbody></table>
+<p>最初は「必要なポート1つだけ」を開けるほうが安全です。</p>
+<p>広いポート範囲をまとめて開放しないほうが整理しやすくなります。</p>
+<p>外部ポートを443以外（例: 8443）へ変えると、一般的なスキャンへ少し引っかかりにくくなります（完全な対策ではありません）。</p>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<p>最初は、公開後すぐに外部接続確認できる環境を用意しておくと切り分けしやすくなります。</p>
+<h3>ステップ3: 設定を確認する</h3>
+<pre><code class="language-sh"># ポートフォワーディングの設定を確認
+uci show firewall | grep redirect
+
+# 外部からのアクセステスト（別ネットワーク端末から）
+# https://ルーターのWAN-IP:8443 でNASにアクセスできるか確認</code></pre>
+<p>外部確認は、同じWi‑Fi内ではなく「モバイル回線」など別ネットワーク側から試す必要があります。</p>
+<p>WAN IPアドレスは <strong>Status</strong> → <strong>Overview</strong> → IPv4 WAN Status で確認します。</p>
+<p>IPoE環境では、そもそも外部着信が制限されるケースもあります。</p>
+<p>ポートフォワーディングはCLIでも設定できますが、最初はLuCIから設定したほうが通信方向を理解しやすいです。</p>
+<h2>CLIでポートフォワーディングを設定する</h2>
+<pre><code class="language-sh"># バックアップ
+BACKUP_DIR=&quot;/root/port-forward-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+cp /etc/config/firewall &quot;$BACKUP_DIR/firewall&quot;
+
+# ポートフォワーディングを追加（NASのHTTPS 8443→443）
+uci add firewall redirect
+uci set firewall.@redirect[-1].name=&#x27;NAS-HTTPS&#x27;
+uci set firewall.@redirect[-1].src=&#x27;wan&#x27;
+uci set firewall.@redirect[-1].proto=&#x27;tcp&#x27;
+uci set firewall.@redirect[-1].src_dport=&#x27;8443&#x27;
+uci set firewall.@redirect[-1].dest=&#x27;lan&#x27;
+uci set firewall.@redirect[-1].dest_ip=&#x27;192.168.1.10&#x27;
+uci set firewall.@redirect[-1].dest_port=&#x27;443&#x27;
+uci set firewall.@redirect[-1].target=&#x27;DNAT&#x27;
+
+# 反映前に差分を確認
+uci changes firewall
+
+uci commit firewall
+/etc/init.d/firewall restart
+
+# 設定確認
+uci show firewall | grep -A 8 redirect
+logread | grep -i &#x27;firewall\|redirect\|nat&#x27; | tail -n 50</code></pre>
+<p><code>uci show firewall | grep redirect</code> は、まず最初に確認したいコマンドです。</p>
+<p>CLIは、最初は設定変更より「今どのポートが公開されているか」を確認する用途で使うくらいでも十分です。</p>
+<h2>アクセス元IPを制限する（推奨）</h2>
+<p>固定IPや特定拠点からのみアクセスする場合は、送信元IPを制限したほうが安全です。</p>
+<pre><code class="language-sh"># 変更前に対象ルールを確認
+uci show firewall | grep -A 10 &quot;name=&#x27;NAS-HTTPS&#x27;&quot;
+
+# 特定IPからのみ許可する場合（例: 203.0.113.1からのみ）
+uci set firewall.@redirect[-1].src_ip=&#x27;203.0.113.1&#x27;
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+
+# 反映後の確認
+uci show firewall | grep -A 10 &quot;name=&#x27;NAS-HTTPS&#x27;&quot;</code></pre>
+<p>LuCIでは <strong>Source IP address</strong> フィールドに送信元IPを入力します。</p>
+<p>「誰からでもアクセス可能」より、「自分の拠点だけ許可」のほうがかなり安全性を上げやすくなります。</p>
+<h2>IPoE環境でのポート開放の注意点</h2>
+<p>MAP-E・DS-Lite環境では、外部からの着信ポートが制限される場合があります。</p>
+<p>特にIPv4 over IPv6環境では、「ポート開放できる前提ではない」ケースもあります。</p>
+<pre><code class="language-sh"># 回線方式を確認
+ifstatus wan | grep -E &#x27;&quot;up&quot;|&quot;ipaddr&quot;|&quot;proto&quot;&#x27;
+ifstatus wan6 | grep -E &#x27;&quot;up&quot;|&quot;ip6addr&quot;|&quot;ip6prefix&quot;|&quot;proto&quot;&#x27;
+
+# ルーティングも確認
+ip route show
+ip -6 route show</code></pre>
+<p><code>ifstatus wan</code> と <code>ifstatus wan6</code> は、まず最初に確認したいコマンドです。</p>
+<p>MAP-E環境では、使用可能ポート番号が制限されています（方式によって異なる）。</p>
+<p>まずはプロバイダ仕様を確認するほうが切り分けしやすくなります。</p>
+<p>固定IP（固定IPサービス + PPPoE）であれば、通常どおりポート開放しやすくなります。</p>
+<h2>公開後の運用チェックリスト</h2>
+<p>ポートを開放したら、「公開しっぱなし」にしないことが重要です。</p>
+<p>以下を定期的に確認します:</p>
+<ul><li>公開先機器のファームウェアが最新か</li><li>認証が強いパスワード/証明書を使っているか</li><li>アクセスログを定期的に確認しているか</li><li>不要になったらすぐに削除する（放置しない）</li></ul>
+<pre><code class="language-sh"># ファイアウォールのログ確認
+logread | grep -i &#x27;FORWARD\|DROP\|REJECT&#x27; | tail -n 50
+
+# NATのログ確認
+logread | grep -i &#x27;nat\|redirect&#x27; | tail -n 30
+
+# 現在の公開ルール棚卸し
+uci show firewall | grep -A 10 redirect</code></pre>
+<p>最初は「大量アクセスが来ていないか」「不要ルールを残していないか」を見るくらいでも十分役立ちます。</p>
+<h2>不要になったルールを削除する</h2>
+<p>ポートフォワーディングは「作って終わり」にしないことが大事です。</p>
+<p>使わなくなった公開設定を放置しないだけでも、安全性はかなり変わります。</p>
+<p>LuCIでの削除:</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Port Forwards</strong></li><li>削除したいルールの <strong>Delete</strong> をクリック</li><li><strong>Save &amp; Apply</strong></li></ol>
+<pre><code class="language-sh"># CLI での削除（対象のインデックスを確認してから）
+uci show firewall | grep -n redirect
+# インデックス確認後
+uci delete firewall.@redirect[N]  # N = 対象のインデックス番号
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+
+# 削除されたことを確認
+uci show firewall | grep redirect</code></pre>
+<p>最初は「今どのポートを開けているか」を定期的に棚卸しするだけでも十分役立ちます。</p>
+<h2>VPN代替を使うべきケース</h2>
+<p>これらの用途は、ポート開放よりVPN（Article 013参照）を使ったほうが安全に整理しやすくなります:</p>
+<ul><li><strong>ルーター管理画面への外部アクセス</strong>: 絶対にポート開放しない</li><li><strong>自分・家族だけが使うNAS</strong>: TailscaleまたはWireGuardで入る</li><li><strong>店舗カメラの遠隔監視</strong>: VPN経由でアクセスする</li><li><strong>リモートデスクトップ（RDP）</strong>: VPN必須</li></ul>
+<p>特に「自分しか使わない」用途は、VPNへ寄せたほうが公開範囲をかなり狭くできます。</p>
+<h2>まとめ</h2>
+<p>ポート開放は、次の順番で進めると整理しやすいです:</p>
+<ol><li>まずVPNで代替できないか検討する</li><li>DHCP予約で公開先機器のIPアドレスを固定する</li><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Port Forwards</strong> → <strong>Add</strong> で転送ルールを設定する</li><li>できれば送信元IPを制限する</li><li>公開後は機器の更新・認証・ログを定期確認する</li><li>不要になったルールはすぐに削除する</li></ol>
+<p>「開けられる」より、「本当に開ける必要があるか」を先に考えることが、安全なポート開放の基本姿勢です。</p>
+<p>特にNASや管理画面用途は、VPNへ置き換えたほうが安全に運用しやすいケースもかなり多くあります。</p>
+<p>最初の成功条件としては、次の3つが見えれば十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>公開先機器が固定IPで安定している</li><li>不要なポートや広すぎる公開をしていない</li><li>代替として VPN を検討したうえで判断している</li></ul>
+<figure><img src="/blog/openwrt/assets/017/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>NASやカメラを見るならポート開放が必要？</h3>
+<p>必ずしも必要ではありません。</p>
+<p>自分や家族だけが使うなら、まずはVPNで代替できないかを考えるほうが安全です。</p>
+<h3>ポート開放は一度設定したら放置でいい？</h3>
+<p>よくありません。</p>
+<p>公開先機器の更新、認証、ログ確認、不用になったルールの削除まで含めて管理が必要です。</p>
+<h3>ポート開放と VPN はどちらが安全？</h3>
+<p>一般的にはVPNのほうが安全に設計しやすいです。</p>
+<p>ポート開放は、公開範囲と管理責任が大きくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT port forwarding: https://support.linksys.com/kb/article/224-en/?section_id=175</li><li>Linksys WireGuard/Tailscale公式モジュール設定手順: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

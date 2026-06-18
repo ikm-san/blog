@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n73a7fed30751">自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】</a></p></blockquote>
+<h1>自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JPは、自宅用途でも家族ごとに使い分けたネットワーク設計ができます。</p>
+<p>「大人のメインWi‑Fi」「子ども向けフィルタリング付きWi‑Fi」「来客用Guest Wi‑Fi」「スマート家電専用Wi‑Fi」を分けることで、セキュリティと快適さを両立しやすくなります。</p>
+<p>ただし、最初から全部を分離しなくても大丈夫です。</p>
+<p>まずは「メインWi‑Fiを安定させる」「Guestを追加する」くらいから始めるだけでも、かなり整理しやすくなります。</p>
+<p>この記事では、自宅向けとして現実的なネットワーク分けの考え方、Kids/IoT/Guestの追加順序、あとから拡張しやすい構成を、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/027/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>自宅で Main / Guest / Kids / IoT をどう分けるか</li><li>家族向けに無理のないネットワーク設計の進め方</li><li>自宅用途で後から機能追加しやすい構成の考え方</li><li>KidsやIoTを分ける時の最小構成</li></ul>
+<h2>こんな家庭に向いています</h2>
+<ul><li>来客用Wi‑Fi、子ども用Wi‑Fi、IoT用Wi‑Fiを整理したい</li><li>家族の使い方に合わせて少しずつ分離を進めたい</li><li>家庭向けでも将来の追加設定を見越して整えておきたい</li></ul>
+<figure><img src="/blog/openwrt/assets/027/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>自宅向け構成も、最初から全部を分けなくて大丈夫です。</p>
+<p>まずは次の順番で十分です。</p>
+<ol><li>メインSSIDを安定して使える状態にする</li><li>Guestを追加する</li><li>必要になったらKidsやIoTを足す</li></ol>
+<p>家庭では、「あとから増やせる形」で始めるほうが、運用もトラブル対応もかなり楽になります。</p>
+<p>最初は、「全部を高度に分離する」より、「用途ごとにざっくり分ける」くらいで十分役立ちます。</p>
+<h2>自宅ネットワーク設計図</h2>
+<pre><code>インターネット
+    │
+    ONU/HGW
+    │
+    LN6001-JP（192.168.1.1）
+    ├── LAN（192.168.1.0/24）  ← 大人・メインPC・NAS
+    │     SSID: HomeWifi-Main（WPA3-SAE）
+    ├── Kids（192.168.3.0/24） ← 子どものスマホ・タブレット
+    │     SSID: HomeWifi-Kids（DNS: Cloudflare Family）
+    ├── IoT（192.168.4.0/24）  ← スマート家電・監視カメラ
+    │     SSID: HomeWifi-IoT（外部に出るのみ）
+    └── Guest（192.168.2.0/24）← 来客用
+          SSID: HomeWifi-Guest（LAN隔離）</code></pre>
+<p>最初は、「大人メイン」「Guest」「IoT」の3つくらいから始めると整理しやすくなります。</p>
+<p>---</p>
+<p>メインSSIDは、「一番安定させたいネットワーク」として考えるほうが整理しやすくなります。</p>
+<p>設定を増やす前に、現在の状態を保存します。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/home-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ifstatus wan &gt; &quot;$BACKUP_DIR/ifstatus-wan.json&quot; 2&gt;/dev/null || true
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot; 2&gt;/dev/null || true
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot; 2&gt;/dev/null || true</code></pre>
+<h2>ステップ1: メインSSIDの設定（大人・家族メイン）</h2>
+<p>設定詳細は 006 の記事を参照してください。</p>
+<ol><li>LuCI: <strong>Network</strong> → <strong>Wireless</strong> → <code>default_radio1</code>（5GHz）の <strong>Edit</strong> をクリック</li><li><strong>Interface Configuration</strong> タブ:</li></ol>
+<table><thead><tr><th>設定項目</th><th>値</th></tr></thead><tbody><tr><td>SSID</td><td>HomeWifi-Main</td></tr><tr><td>Encryption</td><td>WPA3-SAE（または WPA2-PSK/WPA3-SAE mixed）</td></tr><tr><td>Key</td><td>任意の強いパスワード（12文字以上推奨）</td></tr><tr><td>Network</td><td>lan</td></tr></tbody></table>
+<ol><li>6GHzラジオ（<code>default_radio2</code>）にも同じSSID・パスワードを設定すると、MLO対応端末が自動的に最適バンドを使用します（031の記事参照）</li></ol>
+<p>最初は「5GHzを安定利用できる」だけでもかなり快適さが変わります。</p>
+<p>---</p>
+<p>Guest Wi‑Fiは、「家庭内LANへ入れないWi‑Fi」として考えると分かりやすくなります。</p>
+<h2>ステップ2: ゲストWi-Fiの設定（来客用）</h2>
+<p>設定詳細は 007 の記事を参照してください。</p>
+<ol><li>専用ネットワーク（192.168.2.0/24）を作成</li><li>ゲスト専用SSIDを作成しゲストネットワークに接続</li><li>firewallでguestネットワーク→LAN間通信をブロック</li></ol>
+<p>LuCI手順の概要:</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong> → Name: <code>guest</code>, IP: <code>192.168.2.1/24</code>, DHCP有効</li><li><strong>Network</strong> → <strong>Wireless</strong> → 新規SSID追加 → Network: <code>guest</code></li><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Zones</strong> → guestゾーン追加（Input: REJECT, Forward to wan: ACCEPT, Forward to lan: REJECT）</li></ol>
+<p>最初は、「Guestからインターネットだけ使える」状態を作れれば十分です。</p>
+<p>---</p>
+<p>Kidsネットワークは、「子ども端末を全部制御する」より、「まず危険サイトを減らす」くらいから始めるほうが整理しやすくなります。</p>
+<h2>ステップ3: 子ども向けWi-Fiの設定（フィルタリング付き）</h2>
+<p>設定詳細は 010 の記事を参照してください。</p>
+<p>Cloudflare Family DNS（1.1.1.3 / 1.0.0.3）を使って、アダルトコンテンツやマルウェアを自動ブロックします。</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong> → Name: <code>kids</code>, IP: <code>192.168.3.1/24</code></li><li><strong>DHCP Server</strong> タブ → <strong>Advanced Settings</strong> → <strong>DHCP-Options</strong> に追加:</li></ol>
+<ul><li><code>6,1.1.1.3,1.0.0.3</code></li></ul>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 新規SSID → SSID: <code>HomeWifi-Kids</code>, Network: <code>kids</code></li><li>firewallでkidsゾーンを作成（wanへのforwardのみ許可）</li></ol>
+<pre><code class="language-sh"># DHCP DNSオプションをUCIで設定
+uci show dhcp.kids
+cp /etc/config/dhcp /etc/config/dhcp.before-kids-dns.$(date +%Y%m%d-%H%M)
+uci set dhcp.kids.dhcp_option=&#x27;6,1.1.1.3,1.0.0.3&#x27;
+uci changes dhcp
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+
+# 反映後の確認
+uci show dhcp.kids
+logread | grep -i dnsmasq | tail -n 50</code></pre>
+<p>最初は「KidsだけDNSを変える」くらいでもかなり意味があります。</p>
+<p>---</p>
+<p>IoTネットワークは、「信用しきれない機器を分ける」くらいの考え方で十分です。</p>
+<h2>ステップ4: IoT専用Wi-Fiの設定（スマート家電隔離）</h2>
+<p>スマートスピーカー、監視カメラ、ロボット掃除機などのスマート家電を専用ネットワークへ分離します。</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong> → Name: <code>iot</code>, IP: <code>192.168.4.1/24</code></li><li><strong>Network</strong> → <strong>Wireless</strong> → 新規SSID → SSID: <code>HomeWifi-IoT</code>, Network: <code>iot</code></li><li>firewallでiotゾーン作成（wanへのforwardのみ許可、lan/kidsへのforwardはREJECT）</li></ol>
+<p>IoTネットワークに置く端末の例:</p>
+<ul><li>スマートスピーカー（Amazon Echo, Google Home等）</li><li>ロボット掃除機</li><li>スマートTV（NetflixやYouTube専用として使う場合）</li><li>監視カメラ</li><li>スマート照明・コンセント</li></ul>
+<p>最初は「IoTからLANへ入れない」くらいで十分役立ちます。</p>
+<p>---</p>
+<p>NASやプリンターは、IPアドレスが変わると家族から「急に使えない」と見えやすい機器です。</p>
+<h2>ステップ5: NASやプリンターのIPアドレスを固定する</h2>
+<p>設定詳細は 012 の記事を参照してください。</p>
+<p>DHCPで動的割り当てすると、再起動時にIPアドレスが変わる可能性があります。</p>
+<p>NAS、プリンター、スマートTVなどは固定割り当て（DHCP Static Lease）しておくと整理しやすくなります。</p>
+<ol><li><strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Static Leases</strong> タブ</li><li><strong>Add</strong> をクリックして以下を入力:</li></ol>
+<table><thead><tr><th>端末</th><th>MACアドレス</th><th>割り当てIP</th></tr></thead><tbody><tr><td>NAS</td><td>XX:XX:XX:XX:XX:XX</td><td>192.168.1.100</td></tr><tr><td>プリンター</td><td>XX:XX:XX:XX:XX:XX</td><td>192.168.1.101</td></tr><tr><td>スマートTV</td><td>XX:XX:XX:XX:XX:XX</td><td>192.168.1.102</td></tr></tbody></table>
+<p>最初は「NASとプリンターだけ固定する」くらいでもかなり役立ちます。</p>
+<p>---</p>
+<p>広告ブロックは、「全部を完璧に止める」より、「家庭内の不要広告を減らす」くらいで考えるほうが運用しやすくなります。</p>
+<h2>ステップ6: 広告ブロック（adblock）を設定する</h2>
+<p>設定詳細は 008 の記事を参照してください。</p>
+<pre><code class="language-sh">opkg list-installed | grep -E &#x27;adblock|luci-app-adblock&#x27; || true
+opkg update
+opkg install adblock luci-app-adblock
+/etc/init.d/adblock enable
+/etc/init.d/adblock start
+
+/etc/init.d/adblock status
+logread | grep -i adblock | tail -n 80</code></pre>
+<p>LuCI: <strong>Services</strong> → <strong>Adblock</strong> で有効化・ブロックリスト選択・ホワイトリスト追加ができます。</p>
+<p>最初は「普段よく見るサイトが問題なく開けるか」を確認できれば十分です。</p>
+<p>---</p>
+<h2>設定完了後の確認チェックリスト</h2>
+<p>最初の成功条件としては、次の3つを見れば十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>メインSSIDから普通にインターネットへ出られる</li><li>Guestから家庭内NASや管理画面へ届かない</li><li>KidsやIoTを作った場合は、意図した制限だけ効いている</li></ul>
+<table><thead><tr><th>確認事項</th><th>確認方法</th></tr></thead><tbody><tr><td>メインSSIDでインターネット接続できる</td><td>スマートフォンから確認</td></tr><tr><td>Guest SSIDからLAN側NASへ接続できないことを確認</td><td><code>ping 192.168.1.100</code> がタイムアウトになることを確認</td></tr><tr><td>KidsネットワークDNSがCloudflare Familyになっているか</td><td><code>nslookup example.com 1.1.1.3</code></td></tr><tr><td>IoT端末がWANへ出られるか</td><td>スマート家電アプリから動作確認</td></tr><tr><td>IoT端末からNASへアクセスできないか</td><td>NAS IPへpingがタイムアウトになることを確認</td></tr></tbody></table>
+<p>最初は、「GuestがLANへ届かない」「メインSSIDが安定している」の2つを確認できればかなり十分です。</p>
+<p>ルーター側からは、次の確認をまとめて実行すると、どこまで設定できたかを棚卸ししやすくなります。</p>
+<pre><code class="language-sh"># SSIDと紐づくネットワークを確認
+uci show wireless | grep -E &#x27;ssid|network|encryption&#x27;
+
+# ネットワークとDHCPを確認
+uci show network | grep -E &#x27;lan|guest|kids|iot|ipaddr&#x27;
+uci show dhcp | grep -E &#x27;guest|kids|iot|dhcp_option|host&#x27;
+
+# firewall zoneとforwardingを確認
+uci show firewall | grep -E &#x27;guest|kids|iot|zone|forwarding&#x27;
+
+# 接続中端末とログを確認
+cat /tmp/dhcp.leases
+logread | grep -Ei &#x27;dnsmasq|firewall|adblock&#x27; | tail -n 80</code></pre>
+<p>---</p>
+<h2>まとめ</h2>
+<p>全部を一度に入れる必要はありません。</p>
+<p>まずはメインSSIDとGuestを分け、必要になったらKidsやIoTを順番に足していくほうが無理なく進められます。</p>
+<p>自宅では、「あとから増やせる形」で分けておくだけでもかなり扱いやすくなります。</p>
+<p>最初は「Main」「Guest」を安定して使えるだけでも十分です。</p>
+<figure><img src="/blog/openwrt/assets/027/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>自宅のWi‑FiはSSIDを分けたほうがいい？</h3>
+<p>来客やIoT機器があるなら、分けたほうが整理しやすくなります。</p>
+<p>最初はMainとGuestの2つからでも十分です。</p>
+<h3>自宅Wi‑FiでKids用とIoT用は両方作るべき？</h3>
+<p>必要性があれば作る、くらいで大丈夫です。</p>
+<p>子ども用制御を優先したいならKids、スマート家電が多いならIoTを先に作るほうが整理しやすくなります。</p>
+<h3>自宅向けWi‑Fi設定は最初から全部入れるべき？</h3>
+<p>一度に全部入れる必要はありません。</p>
+<p>Main、Guest、Kids、IoTの順で段階的に足すほうが安全です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

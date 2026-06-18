@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/ndd6f12876bc8">LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】</a></p></blockquote>
+<h1>LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JPは、2.4GHz、5GHz、6GHzを使えるWi‑Fi 7ルーターです。</p>
+<p>ただ、Wi‑Fi 7という言葉だけを見ると、「とにかく全部を高速化すればいい」と考えがちですが、実際には“どの端末をどの帯域へつなぐか” を整理するほうが、家庭や小さなオフィスではかなり重要です。</p>
+<p>目安としては、互換性重視の2.4GHz、日常利用の主力になる5GHz、Wi‑Fi 6E/7対応端末向けの6GHzという分け方が分かりやすいです。</p>
+<p>また、MLO（マルチリンクオペレーション）のようなWi‑Fi 7機能もありますが、最初から無理に有効化しなくても大丈夫です。まずは安定してつながる構成を作り、そのあと必要に応じて調整していくほうが扱いやすくなります。</p>
+<p>この記事では、LuCIでの具体的な設定手順と、帯域ごとの使い分けを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/006/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>2.4GHz、5GHz、6GHzをどう使い分けると分かりやすいか</li><li>LN6001-JPでSSIDをどう分けると運用しやすいか</li><li>MLOを使うべきかどうかの考え方</li><li>家庭・小規模オフィス向けの現実的なSSID構成例</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>2.4GHz、5GHz、6GHzのどれを使えばいいか迷っている</li><li>家庭や小さなオフィスでSSIDの分け方を整理したい</li><li>MLOを使うべきか、通常のSSID構成で十分か判断したい</li></ul>
+<figure><img src="/blog/openwrt/assets/006/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>最初から全帯域を複雑に使い分けなくても大丈夫です。むしろ、最初はシンプルな構成のほうが管理しやすくなります。</p>
+<p>まずは次の3つで十分です。</p>
+<ol><li>5GHzを主力SSIDにする</li><li>2.4GHzはIoTや古い端末向けに分ける</li><li>6GHzやMLOは対応端末がそろってから検討する</li></ol>
+<p>最初の段階では、「最大速度」より「どの端末をどこへつなぐか」が整理できているほうが運用しやすいです。</p>
+<h2>用語ミニ解説</h2>
+<ul><li>SSID: スマートフォンやPCに表示されるWi-Fi名です。</li><li>2.4GHz: 古い端末やIoT機器で使いやすく、届きやすい一方で混雑しやすい帯域です。</li><li>5GHz: PC、スマートフォン、テレビなど日常利用の主力になりやすい帯域です。</li><li>6GHz: Wi-Fi 6E/7対応端末で使える新しい帯域です。対応端末が必要です。</li><li>MLO: Wi-Fi 7の機能のひとつ。複数帯域を同時使用します。端末側の対応も必要です。</li></ul>
+<h2>帯域ごとの特徴と向く端末</h2>
+<table><thead><tr><th>帯域</th><th>向く端末</th><th>特徴</th></tr></thead><tbody><tr><td>2.4GHz</td><td>IoT、古い端末、遠い部屋</td><td>届きやすいが混雑しやすい</td></tr><tr><td>5GHz</td><td>PC、スマートフォン、テレビ</td><td>日常の主力、バランスがよい</td></tr><tr><td>6GHz</td><td>Wi-Fi 7対応端末</td><td>混雑少なく高速、対応端末が必要</td></tr></tbody></table>
+<p>Wi‑Fi設定で迷った時は、「どの端末をどの帯域へ逃がしたいか」で考えると整理しやすくなります。</p>
+<p>例えば、IoT機器を2.4GHzへまとめておくと、スマートフォンやPCを5GHz側へ寄せやすくなります。</p>
+<p>Linksys公式のWi‑Fi設定ページでは、LuCIの <code>Network &gt; Wireless</code> から各無線を編集する流れが案内されています。<code>wifi0</code> が2.4GHz、<code>wifi1</code> が5GHz、<code>wifi2</code> が6GHzとして説明されています。</p>
+<p>最初は全部を細かく調整する必要はありません。まずはSSID名とパスワードを整理し、どの帯域をどの用途に使うかだけ決めれば十分です。</p>
+<p>設定を変える前に、現在の無線状態を読み取りだけで控えておくと安心です。</p>
+<pre><code class="language-sh">echo &quot;### wireless config summary&quot;
+uci show wireless | grep -E &#x27;wifi-device|wifi-iface|ssid|encryption|network|disabled&#x27;
+
+echo &quot;### radio status&quot;
+wifi status
+
+echo &quot;### wireless interfaces&quot;
+iw dev</code></pre>
+<p>この段階では、SSID名、暗号化方式、どのnetworkに紐付いているか、有効/無効状態を見るだけにします。無線の国設定、送信出力、DFS関連の値はこの連載では変更しません。</p>
+<h2>LuCIでのSSID設定手順</h2>
+<p>SSID設定は、日常運用で最も触ることが多い設定のひとつです。</p>
+<p>最初は「家族用」「IoT用」「来客用」くらいに整理できれば十分実用になります。</p>
+<h3>既存SSIDを編集する</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> を開く</li><li>変更したい無線（2.4G / 5G / 6G）の <strong>Edit</strong> をクリック</li><li><strong>Interface Configuration</strong> タブ:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定内容</th></tr></thead><tbody><tr><td>ESSID</td><td>Wi-Fi名（例: <code>MyHome</code> / <code>MyHome_5G</code> / <code>MyHome_6G</code>）</td></tr><tr><td>Mode</td><td><code>Access Point</code>（変更不要）</td></tr><tr><td>Network</td><td>接続するLAN/networkを選択</td></tr></tbody></table>
+<ol><li><strong>Wireless Security</strong> タブ:</li></ol>
+<table><thead><tr><th>フィールド</th><th>設定内容</th></tr></thead><tbody><tr><td>Encryption</td><td><code>WPA2-PSK</code>（互換性重視）または <code>WPA3-SAE</code>（最新端末向け）</td></tr><tr><td>Key</td><td>Wi-Fiパスワード（8文字以上）</td></tr></tbody></table>
+<ol><li><strong>Save</strong> をクリック</li><li>各帯域分（2.4 / 5 / 6）繰り返す</li><li><strong>Apply</strong> ボタンで設定を反映</li></ol>
+<h3>新しいSSIDを追加する（Guest用など）</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> を開く</li><li>追加したい帯域（例: 5GHz <code>wifi1</code>）の <strong>Add</strong> をクリック</li><li>上記と同様に ESSID・セキュリティを設定</li><li><strong>Network</strong> タブで、接続するネットワーク（Guestネットワークが必要な場合は先にNetworkで作成）を選択</li><li><strong>Save</strong> → <strong>Apply</strong></li></ol>
+<p>Guest用SSIDを作る場合は、後続の記事で紹介する firewall zone や VLAN と組み合わせると、家庭用ネットワークと分離しやすくなります。</p>
+<h2>無線の有効・無効の切り替え</h2>
+<h3>LuCIで切り替える</h3>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> を開く</li><li>対象のSSIDの <strong>Disable</strong>（無効化）または <strong>Enable</strong>（有効化）をクリック</li></ol>
+<p>帯域ごとに独立して有効/無効を切り替えられます。</p>
+<p>使わない帯域を無効化すると、電波干渉の軽減や電力削減につながることがあります。</p>
+<h3>CLIで状態を確認</h3>
+<pre><code class="language-sh">echo &quot;### wireless config&quot;
+uci show wireless
+
+echo &quot;### SSID / disabled flags&quot;
+uci show wireless | grep -E &#x27;ssid|disabled&#x27;
+
+echo &quot;### radio status&quot;
+wifi status</code></pre>
+<p>帯域の有効/無効切り替えはLuCIで行うのが安全です。</p>
+<p><code>wireless.default_radio2</code> のようなセクション名は環境で変わることがあります。CLIは、最初は変更より状態確認に使うくらいで十分です。</p>
+<h2>帯域別の推奨設定と使い方</h2>
+<h3>2.4GHz: IoTと古い端末向け</h3>
+<p><strong>推奨設定:</strong></p>
+<ul><li>SSID: <code>MyHome_IoT</code>（用途がわかる名前）</li><li>Encryption: <code>WPA2-PSK</code>（古い端末との互換性を重視）</li><li>チャネル: 自動（Auto）または1/6/11から選択</li></ul>
+<p><strong>向く端末:</strong></p>
+<ul><li>スマートスピーカー（Amazon Echo, Google Home等）</li><li>スマートテレビ（Wi-Fi 5以下のモデル）</li><li>古いゲーム機（Nintendo DS, 初代Fire TV等）</li><li>IoTセンサー、スマート照明</li><li>遠い部屋の端末（壁や床を通りやすい）</li></ul>
+<p><strong>注意点:</strong></p>
+<ul><li>電子レンジ・Bluetooth・近隣Wi-Fiの影響を受けやすい</li><li>複数のIoT機器をつなぐと混雑しやすい</li><li>速度を重視する用途は5GHz/6GHzへ移す</li></ul>
+<p>IoT機器を2.4GHz側へまとめておくと、「なぜかIoTだけ切れる」「5GHzへつながらない」といった切り分けがしやすくなります。</p>
+<h3>5GHz: 日常利用の主力</h3>
+<p><strong>推奨設定:</strong></p>
+<ul><li>SSID: <code>MyHome</code> または <code>MyHome_5G</code></li><li>Encryption: <code>WPA3-SAE</code>（新しい端末）または <code>WPA2-PSK</code>（混在環境）</li><li>チャネル幅: <code>80MHz</code>（通常）または <code>160MHz</code>（高速な場合）</li></ul>
+<p><strong>向く端末:</strong></p>
+<ul><li>ノートPC・デスクトップPC</li><li>スマートフォン（iPhone/Android）</li><li>タブレット</li><li>ゲーム機（PS5, Nintendo Switch等）</li><li>スマートテレビ（最新モデル）</li></ul>
+<p><strong>5GHzが2.4GHzより良い点:</strong></p>
+<ul><li>混雑が少なく安定しやすい</li><li>速度が出やすい</li><li>動画視聴・オンライン会議に向く</li></ul>
+<p>家庭や小さなオフィスでは、まず5GHzを中心に構成しておくとバランスを取りやすいです。</p>
+<h3>6GHz: Wi-Fi 7対応端末向け</h3>
+<p><strong>推奨設定:</strong></p>
+<ul><li>SSID: <code>MyHome_6G</code>（MLO設計にする場合は他帯域と同じSSID名）</li><li>Encryption: <code>WPA3-SAE</code>（必須）</li><li>チャネル幅: <code>80MHz</code> または <code>160MHz</code></li></ul>
+<p><strong>向く端末:</strong></p>
+<ul><li>Wi-Fi 7対応スマートフォン（2023年以降のフラグシップモデル）</li><li>Wi-Fi 7対応ノートPC（2024年以降の一部モデル）</li></ul>
+<p><strong>6GHzの注意点:</strong></p>
+<ul><li>対応端末がない場合は使えない</li><li>壁や床を通りにくく、近距離で効果的</li><li>すべての端末を6GHzへまとめることはできない</li></ul>
+<p>「6GHzを有効化すれば全部速くなる」というより、対応端末だけを混雑の少ない帯域へ逃がせるイメージに近いです。</p>
+<h2>MLO（マルチリンクオペレーション）の設定</h2>
+<p>MLOはWi‑Fi 7の機能で、複数帯域を同時使用することで速度・安定性を向上させます。</p>
+<p>ただし、現時点では「まず最初に有効化すべき必須機能」というより、対応端末がそろってきた時に検討する機能、と考えるほうが現実的です。</p>
+<p><strong>MLOを使う場合の前提:</strong></p>
+<ul><li>端末側もWi-Fi 7対応が必要</li><li>2.4GHz / 5GHz / 6GHzの3つのSSID名を完全に同じにする</li><li>暗号化はすべて <code>WPA3-SAE</code></li><li>セキュリティキーも同一にする</li></ul>
+<p><strong>LuCIでのMLO設定:</strong></p>
+<ol><li>2.4GHz / 5GHz / 6GHz のSSIDをすべて同じ名前（例: <code>MyHome</code>）に設定</li><li>すべての帯域で Encryption を <code>WPA3-SAE</code> に統一</li><li>すべての帯域で同じパスワードを設定</li><li>Apply で反映</li><li><strong>Network</strong> → <strong>MLO</strong> を開き、<strong>AP MLO Enable</strong> にチェックを入れて <strong>Save &amp; Apply</strong></li></ol>
+<p>Linksys公式のMLO設定手順では、有線接続したPCから作業し、3つのSSID名・WPA3-SAE・セキュリティキーをそろえたうえで <strong>Network</strong> → <strong>MLO</strong> から有効化する流れが案内されています。端末側がWi-Fi 7対応であれば、自動的に最適な帯域を組み合わせて使用します。</p>
+<p>MLOは機能としてはかなり面白いのですが、現時点では「まず使うべき必須機能」というほどではありません。</p>
+<p>対応端末がそろっていないと効果を実感しにくく、日常利用では5GHzや6GHzを素直に使い分けるだけでも十分なことが多いです。</p>
+<p>LN6001-JPを2台使って無線バックホールまで含めて組むような場面なら検討の余地がありますが、興味がなければ無理に有効化しなくても大丈夫です。</p>
+<p>MLOを有効化する前後も、CLIではまず読み取りに留めます。</p>
+<pre><code class="language-sh">echo &quot;### MLO prerequisite check from wireless config&quot;
+uci show wireless | grep -E &#x27;ssid|encryption|disabled&#x27;
+
+echo &quot;### associated stations&quot;
+for ifc in $(iw dev | awk &#x27;$1 == &quot;Interface&quot; {print $2}&#x27;); do
+  echo &quot;### $ifc&quot;
+  iw dev &quot;$ifc&quot; station dump | grep -E &#x27;Station|signal:|tx bitrate:|rx bitrate:|connected time:&#x27; || true
+done</code></pre>
+<p>同じ端末が複数radioに見える場合がありますが、Linksys公式の説明どおり、実際にTX/RXレートが出るactive radioは端末や電波状況で変わります。MLO確認はLuCIの <strong>Network</strong> → <strong>Wireless</strong> → <strong>Associated Stations</strong> と合わせて見るのが分かりやすいです。</p>
+<h2>推奨のSSID構成例</h2>
+<h3>家庭向け（シンプル構成）</h3>
+<table><thead><tr><th>SSID</th><th>帯域</th><th>用途</th><th>暗号化</th></tr></thead><tbody><tr><td><code>MyHome</code></td><td>5GHz</td><td>PC・スマートフォン</td><td>WPA3-SAE</td></tr><tr><td><code>MyHome_IoT</code></td><td>2.4GHz</td><td>IoT機器</td><td>WPA2-PSK</td></tr><tr><td><code>MyHome_Guest</code></td><td>5GHz</td><td>来客端末</td><td>WPA2-PSK</td></tr></tbody></table>
+<h3>Wi-Fi 7 MLO構成（対応端末あり）</h3>
+<table><thead><tr><th>SSID</th><th>帯域</th><th>用途</th><th>暗号化</th></tr></thead><tbody><tr><td><code>MyHome</code></td><td>2.4GHz</td><td>MLO（全帯域共通SSID）</td><td>WPA3-SAE</td></tr><tr><td><code>MyHome</code></td><td>5GHz</td><td>MLO（全帯域共通SSID）</td><td>WPA3-SAE</td></tr><tr><td><code>MyHome</code></td><td>6GHz</td><td>MLO（全帯域共通SSID）</td><td>WPA3-SAE</td></tr><tr><td><code>MyHome_IoT</code></td><td>2.4GHz</td><td>IoT機器</td><td>WPA2-PSK</td></tr><tr><td><code>MyHome_Guest</code></td><td>5GHz</td><td>来客端末</td><td>WPA2-PSK</td></tr></tbody></table>
+<h3>小さなオフィス向け</h3>
+<table><thead><tr><th>SSID</th><th>帯域</th><th>用途</th><th>暗号化</th></tr></thead><tbody><tr><td><code>Staff_WiFi</code></td><td>5GHz</td><td>業務PC・スタッフ端末</td><td>WPA3-SAE</td></tr><tr><td><code>Guest_WiFi</code></td><td>5GHz</td><td>来客・来訪者</td><td>WPA2-PSK</td></tr><tr><td><code>IoT_Camera</code></td><td>2.4GHz</td><td>防犯カメラ・設備</td><td>WPA2-PSK</td></tr></tbody></table>
+<h2>CLIで状態を確認する</h2>
+<pre><code class="language-sh">echo &quot;### radio status&quot;
+wifi status
+
+echo &quot;### wireless config&quot;
+uci show wireless
+
+echo &quot;### wireless interfaces&quot;
+iw dev
+
+echo &quot;### connected stations&quot;
+for ifc in $(iw dev | awk &#x27;$1 == &quot;Interface&quot; {print $2}&#x27;); do
+  echo &quot;### $ifc&quot;
+  iw dev &quot;$ifc&quot; station dump | grep -E &#x27;Station|signal:|tx bitrate:|rx bitrate:|connected time:&#x27; || true
+done
+
+echo &quot;### recent wireless logs&quot;
+logread | grep -Ei &#x27;wireless|wifi|wlan|hostapd&#x27; | tail -n 80</code></pre>
+<p><code>wifi status</code> は、どの帯域が有効か、SSIDがどう設定されているかを見る時に便利です。</p>
+<p>まずは設定変更より、「今どの帯域が動いているか」を確認する用途で使うと分かりやすいです。</p>
+<h2>設定変更前のバックアップ</h2>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/wireless-before-change-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+cp /etc/config/wireless &quot;$BACKUP_DIR/wireless&quot;
+uci show wireless &gt; &quot;$BACKUP_DIR/wireless.uci.txt&quot;
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot;
+iw dev &gt; &quot;$BACKUP_DIR/iw-dev.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>このバックアップにはWi-Fiパスワードが含まれるため、そのままチャットや公開記事に貼り付けないようにします。</p>
+<p>変更後に問題が出た場合の復元:</p>
+<pre><code class="language-sh">cp /root/wireless-before-change-YYYYMMDD-HHMM/wireless /etc/config/wireless
+wifi restart</code></pre>
+<p>Wi‑Fi設定は、SSID名や暗号化方式を少し変えただけでも端末が再接続できなくなることがあります。変更前バックアップを残しておくと安心です。</p>
+<h2>帯域の選び方で迷ったら</h2>
+<p>2.4GHz・5GHz・6GHzは、数字が大きいほど常によいわけではありません。</p>
+<p>それぞれ「届きやすさ」「安定性」「速度」「対応端末」が違います。</p>
+<ul><li>IoT機器や古い端末 → <strong>2.4GHz</strong>（互換性と届きやすさを優先）</li><li>PC・スマートフォン・テレビ → <strong>5GHz</strong>（速度とバランス）</li><li>Wi-Fi 7対応の最新端末 → <strong>6GHz or MLO</strong>（最高速度）</li></ul>
+<p>最初は家族用・来客用・IoT用の3つのSSIDに分けるだけで整理しやすくなります。複雑にしすぎず、まずシンプルな構成から始めてください。</p>
+<p>設定後は、次の3つが確認できれば十分です。最初から完璧なWi‑Fi設計を目指さなくても大丈夫です。</p>
+<ul><li>主力の端末が想定どおり 5GHz か 6GHz へつながっている</li><li>IoT 機器や古い端末が 2.4GHz で安定している</li><li>6GHz や MLO を使わなくても日常利用で困っていない</li></ul>
+<h2>まとめ</h2>
+<p>LuCIでのSSID設定は <strong>Network</strong> → <strong>Wireless</strong> → <strong>Edit</strong> から行います。</p>
+<p>帯域ごとに適切な端末を割り振ることで、家庭・店舗全体のWi‑Fi体験が改善します。</p>
+<p>Wi‑Fi 7のMLOを使いたい場合は、3帯域すべてのSSID名・WPA3-SAE・パスワードを統一し、<strong>Network</strong> → <strong>MLO</strong> で <strong>AP MLO Enable</strong> を有効にします。</p>
+<p>通常のSSID設計とMLO設計は方向性が違うため、まずはシンプルなSSID構成から始め、必要に応じてMLOを検討するくらいが扱いやすいです。</p>
+<figure><img src="/blog/openwrt/assets/006/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPでは2.4GHz、5GHz、6GHzを全部使い分けるべき？</h3>
+<p>最初から細かく分ける必要はありません。まずは5GHzを主力にし、IoT用に2.4GHz、対応端末があるなら6GHzを足すくらいで十分です。</p>
+<p>シンプルに始めたほうが、あとからトラブル切り分けもしやすくなります。</p>
+<h3>LN6001-JPの6GHzはどんな端末なら使える？</h3>
+<p>Wi-Fi 6E や Wi-Fi 7 に対応した端末が必要です。古いスマートフォンやPCでは見えないことがあります。</p>
+<h3>LN6001-JPのMLOは最初から有効にしたほうがいい？</h3>
+<p>必須ではありません。対応端末が少ないうちは、通常のSSID設計で運用したほうが分かりやすいです。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT WiFi settings: https://support.linksys.com/kb/article/221-en/?section_id=175</li><li>Linksys OpenWRT MLO setup: https://support.linksys.com/kb/article/8652-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n516c42447850">VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】</a></p></blockquote>
+<h1>VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>VLANは、1台のルーターやスイッチ上で複数の論理ネットワークを分ける仕組みです。</p>
+<p>小さなオフィスや店舗では、スタッフ端末、ゲストWi‑Fi、POS、防犯カメラなどを分けるために役立ちます。</p>
+<p>ただし、最初から全部をVLAN化する必要はありません。まずはGuest Wi‑Fiとfirewall zoneで無線分離を作り、「有線端末も分けたい」となった段階でVLANを追加していくほうが現実的です。</p>
+<p>LN6001-JPはOpenWrtベースなので、SSID、DHCP、VLAN、firewall zone を組み合わせた柔軟な設計ができます。</p>
+<p>この記事では、小さなオフィスや店舗向けに、「どこまで分けるべきか」「どの順番で進めると崩しにくいか」を中心に整理していきます。</p>
+<figure><img src="/blog/openwrt/assets/011/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>VLANとGuest Wi‑Fiの違い</li><li>小さなオフィスや店舗でVLANをどう分けると整理しやすいか</li><li>firewall zone を含めた基本的な分離の考え方</li><li>VLAN設定でつまずきやすいポイントと安全な進め方</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>ゲストWi-Fiだけでなく、有線のPOSやカメラも分けたい</li><li>小さなオフィスや店舗で Staff、Guest、Camera を整理したい</li><li>VLANが必要か、Guest Wi‑Fiだけで足りるか判断したい</li></ul>
+<figure><img src="/blog/openwrt/assets/011/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>VLANは最初から完成形を作ろうとすると崩しやすいです。むしろ、最初は「最低限の分離」だけ作るほうが安全です。</p>
+<p>まずは次の順で進めると安全です。</p>
+<ol><li>Guest Wi‑Fiとfirewallで無線分離を作る</li><li>DHCP予約で主要機器のIPを整理する</li><li>必要になったらCameraやDevice用VLANを追加する</li></ol>
+<p>最初の目的は「全部を分けること」ではなく、「分けたい通信だけ確実に分けること」です。</p>
+<p>小さなオフィスでは、複雑な構成より「誰がどのネットワークへ入るか」が整理されているほうが、運用しやすくなります。</p>
+<h2>設定前に現在の状態を控える</h2>
+<p>VLANやfirewallを触る前に、現在の状態を保存します。特に有線ポートやVLANを変更する場合、管理画面へ戻れなくなる可能性があるため、有線LANで管理端末を接続し、復旧手段を用意してから進めます。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/vlan-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ip link show &gt; &quot;$BACKUP_DIR/ip-link.txt&quot;
+ip addr show &gt; &quot;$BACKUP_DIR/ip-addr.txt&quot;
+bridge vlan show &gt; &quot;$BACKUP_DIR/bridge-vlan.txt&quot; 2&gt;/dev/null || true
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>このバックアップにはネットワーク構成やSSID情報が含まれるため、公開場所へそのまま貼らないようにします。</p>
+<h2>用語ミニ解説</h2>
+<ul><li>VLAN: 1台の機器上に複数の仮想ネットワークを作る仕組みです。</li><li>firewall zone: ネットワーク同士の通信可否を決める境界線です。</li><li>DHCP: 各ネットワークの端末へIPアドレスを自動配布する仕組みです。</li><li>tagged/untagged: スイッチポートのVLANタグ設定です。通常、taggedはスイッチ間接続、untaggedは端末接続で使います。</li></ul>
+<h2>VLANとGuest Wi-Fiの違い</h2>
+<p>Guest Wi‑Fi（SSID分離＋firewall）は、無線端末の分離に向きます。</p>
+<p>VLANは、有線端末も含めてネットワークを論理的に分ける場合に必要です。</p>
+<table><thead><tr><th>方法</th><th>向く用途</th></tr></thead><tbody><tr><td>SSID分離＋firewall</td><td>ゲストWi-FiとLANの分離（無線のみ）</td></tr><tr><td>VLAN</td><td>有線機器（POS・カメラ）も含めた分離</td></tr></tbody></table>
+<p>つまり、「ゲストWi‑Fiだけ分けたい」ならGuest Wi‑Fiで十分なこともあります。</p>
+<p>一方で、POS、防犯カメラ、業務PCなど、有線も含めて整理したい場合はVLANが必要になります。</p>
+<p>まずゲストWi‑FiのSSID分離を行い、有線機器の分離が必要になった段階でVLANへ進む順番が現実的です。</p>
+<h2>小さなオフィスのVLAN設計例</h2>
+<table><thead><tr><th>ネットワーク</th><th>用途</th><th>IPアドレス範囲</th><th>VLAN ID</th></tr></thead><tbody><tr><td>Staff</td><td>業務PC・管理端末・NAS</td><td>192.168.1.0/24</td><td>1（タグなし/デフォルト）</td></tr><tr><td>Guest</td><td>ゲストWi-Fi</td><td>192.168.2.0/24</td><td>10</td></tr><tr><td>Camera</td><td>防犯カメラ・録画機</td><td>192.168.3.0/24</td><td>20</td></tr></tbody></table>
+<p>最初から細かく分けすぎる必要はありません。</p>
+<p>例えば、StaffとGuestだけでもかなり意味があります。CameraやIoTは、必要になってから追加しても遅くありません。</p>
+<p>POSや決済端末は、ベンダーのサポート条件を優先します。</p>
+<p>勝手にVLANへ組み込まず、ベンダーへ確認してから対応を決めてください。業務系端末は、通信要件がかなり限定されている場合があります。</p>
+<h2>firewall通信方針を先に決める</h2>
+<p>VLANを作る前に、「どのネットワークからどこへ通信してよいか」を先に決めておくと、あとから設定が崩れにくくなります。</p>
+<table><thead><tr><th>送信元</th><th>宛先</th><th>方針</th></tr></thead><tbody><tr><td>Staff</td><td>WAN</td><td>許可</td></tr><tr><td>Staff</td><td>Camera</td><td>許可（監視用）</td></tr><tr><td>Guest</td><td>WAN</td><td>許可</td></tr><tr><td>Guest</td><td>Staff</td><td><strong>拒否</strong></td></tr><tr><td>Guest</td><td>Camera</td><td><strong>拒否</strong></td></tr><tr><td>Camera</td><td>WAN</td><td>要件次第（録画機のクラウド接続のみ許可など）</td></tr><tr><td>Camera</td><td>Staff</td><td><strong>拒否</strong></td></tr></tbody></table>
+<p>特にGuestからStaffへ届かないことを最優先に確認します。</p>
+<p>Cameraネットワークも、「録画機だけ許可」「クラウドだけ許可」のように、必要最小限へ寄せたほうが整理しやすいです。</p>
+<p>OpenWrt系では、「VLAN」「ネットワーク」「SSID」「firewall zone」を別々に組み合わせて作ります。</p>
+<p>最初は少し複雑に見えますが、役割ごとに分かれているぶん、あとから整理しやすいのが特徴です。</p>
+<h3>ステップ1: 各ネットワークインターフェースを作成する</h3>
+<p><strong>Guestネットワーク（VLAN ID: 10）:</strong></p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong></li><li>Name: <code>guest</code></li><li>Protocol: <code>Static address</code></li><li>IPv4 address: <code>192.168.2.1</code>、Netmask: <code>255.255.255.0</code></li><li><strong>DHCP Server</strong> タブ → Setup DHCP Server</li></ol>
+<ul><li>Start: <code>100</code>、Limit: <code>50</code>、Leasetime: <code>1h</code></li></ul>
+<ol><li><strong>Save</strong></li></ol>
+<p>ここで作っているのは、Guest端末専用のIPアドレス空間です。</p>
+<p>Staff側とは別の <code>192.168.2.x</code> を使うことで、あとからfirewallで分離しやすくなります。</p>
+<p><strong>Cameraネットワーク（VLAN ID: 20）:</strong></p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong></li><li>Name: <code>camera</code></li><li>Protocol: <code>Static address</code></li><li>IPv4 address: <code>192.168.3.1</code>、Netmask: <code>255.255.255.0</code></li><li><strong>DHCP Server</strong> タブ → Setup DHCP Server</li></ol>
+<ul><li>Start: <code>100</code>、Limit: <code>20</code>、Leasetime: <code>12h</code></li></ul>
+<ol><li><strong>Save</strong></li></ol>
+<p>Cameraネットワークは、防犯カメラや録画機などをまとめる用途を想定しています。</p>
+<p>「Camera → Staffは拒否」「Staff → Cameraだけ許可」のような構成にすると整理しやすくなります。</p>
+<h3>ステップ2: firewall zonesを設定する</h3>
+<p>ここが実際にネットワーク間の通信を制御する部分です。</p>
+<p>VLANやSSIDを分けても、firewall zone を分けなければ通信できてしまう場合があります。</p>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Zones</strong> タブ</li><li><strong>Add</strong> をクリック（guestゾーン）:</li></ol>
+<ul><li>Name: <code>guest</code></li><li>Input: <code>REJECT</code>、Output: <code>ACCEPT</code>、Forward: <code>REJECT</code></li><li>Covered networks: <code>guest</code></li><li>Allow forward to: <code>wan</code></li></ul>
+<ol><li><strong>Add</strong> をクリック（cameraゾーン）:</li></ol>
+<ul><li>Name: <code>camera</code></li><li>Input: <code>REJECT</code>、Output: <code>ACCEPT</code>、Forward: <code>REJECT</code></li><li>Covered networks: <code>camera</code></li><li>Allow forward to: （空白）※インターネット接続不要ならwanも外す</li></ul>
+<ol><li><strong>Save &amp; Apply</strong></li></ol>
+<p>この設定では、「Guest → WAN」は許可し、「Guest → Staff」は拒否されます。</p>
+<p>Camera側も、必要な通信だけ許可する方向で作ると、あとから見返した時に分かりやすくなります。</p>
+<h3>ステップ3: StaffからCameraへのアクセスを許可する</h3>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Traffic Rules</strong> → <strong>Add</strong></li><li>Name: <code>Staff to Camera</code></li><li>Source zone: <code>lan</code>（Staffネットワーク）</li><li>Destination zone: <code>camera</code></li><li>Action: <code>ACCEPT</code></li><li><strong>Save &amp; Apply</strong></li></ol>
+<p>監視画面確認や録画管理など、必要な方向だけ許可するイメージです。</p>
+<p>最初から双方向通信を全部許可しないほうが、構成がシンプルになります。</p>
+<h3>ステップ4: SSIDをネットワークに紐付ける</h3>
+<p>各SSIDを対応するネットワークに紐付けます（Guest Wi-Fi設定の手順と同じ）:</p>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 任意帯域の <strong>Add</strong></li><li>ESSID: <code>Staff_WiFi</code> / <code>Guest_WiFi</code> など</li><li>Network: 対応するネットワーク（<code>lan</code> / <code>guest</code> / <code>camera</code>）を選択</li><li><strong>Save</strong> → <strong>Apply</strong></li></ol>
+<p>Staff用とGuest用SSIDは、名前を明確に分けたほうが運用しやすいです。</p>
+<p>特に店舗では、ゲスト側が迷わないSSID名にしておくとトラブルを減らしやすくなります。</p>
+<h2>有線ポートのVLAN割り当て（高度な設定）</h2>
+<p>LN6001-JPの物理的なLANポートを特定のVLANへ割り当てる場合、ネットワークスイッチ設定も関係してきます。</p>
+<p>ここは設定を間違えると管理画面へ戻れなくなることもあるため、最初は無理に触らなくても大丈夫です。</p>
+<p><strong>注意事項:</strong></p>
+<ul><li>有線ポートのVLAN設定を誤ると、管理画面へのアクセスが失われる場合があります</li><li>設定前に必ずバックアップを取り、有線でLANポートに接続した状態で作業してください</li></ul>
+<p>まずはSSID分離とfirewallだけで運用し、必要になった時に有線VLANへ進むほうが安全です。</p>
+<h3>現在のスイッチ構成を確認する</h3>
+<pre><code class="language-sh">echo &quot;### Linux interfaces&quot;
+ip link show
+
+echo &quot;### bridge VLAN table, if available&quot;
+bridge vlan show 2&gt;/dev/null || true
+
+echo &quot;### swconfig, if available&quot;
+swconfig list 2&gt;/dev/null || true
+swconfig dev switch0 show 2&gt;/dev/null || true
+
+echo &quot;### network UCI hints&quot;
+uci show network | grep -E &#x27;device|bridge|ports|vlan|switch|ifname|proto&#x27;</code></pre>
+<p>まずは「今どう構成されているか」を確認するところから始めます。</p>
+<p>CLIは、最初は変更より状態確認に使うくらいで十分です。</p>
+<h3>UCIで有線ポートにVLANを割り当てる</h3>
+<p>LN6001-JPのポートマップを確認した上で設定します（ポート番号はファームウェアで異なる場合があります）:</p>
+<pre><code class="language-sh">echo &quot;### backup network config&quot;
+cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d-%H%M)
+
+echo &quot;### current VLAN-related config&quot;
+uci show network | grep -E &#x27;device|bridge|ports|vlan|switch|ifname&#x27;</code></pre>
+<p>有線ポートVLANは、実機ポート番号を勘違いすると管理アクセスを失いやすい部分です。</p>
+<p>変更前バックアップと、有線LAN接続での作業を強くおすすめします。</p>
+<p>有線ポートのVLAN割り当ては、LN6001-JPの実機ポートマップを確認してから設定します。ポート番号はLuCIの <strong>Network</strong> → <strong>Switch</strong> ページでも確認できます。</p>
+<p>最初は「どのポートがどこにつながっているか」を整理するだけでも十分役立ちます。</p>
+<h2>設定確認コマンド</h2>
+<pre><code class="language-sh">echo &quot;### network&quot;
+uci show network
+
+echo &quot;### firewall&quot;
+uci show firewall
+
+echo &quot;### addresses&quot;
+ip addr show
+
+echo &quot;### DHCP leases&quot;
+cat /tmp/dhcp.leases
+
+echo &quot;### routes&quot;
+ip route show
+
+echo &quot;### communication tests from staff network&quot;
+ping -c 3 192.168.2.1  # guestルーターへのping
+ping -c 3 192.168.3.1  # cameraルーターへのping</code></pre>
+<p><code>uci show network</code> と <code>uci show firewall</code> は、ネットワーク分離がどう組まれているかを見る時にかなり便利です。</p>
+<p>CLIは、最初は設定変更より「今どうつながっているか」を確認する用途で使うくらいで十分です。</p>
+<h2>設定変更前のバックアップ</h2>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/vlan-before-change-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+ip link show &gt; &quot;$BACKUP_DIR/ip-link.txt&quot;
+bridge vlan show &gt; &quot;$BACKUP_DIR/bridge-vlan.txt&quot; 2&gt;/dev/null || true
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>VLAN設定は、network / firewall / wireless / dhcp がまとめて関係してきます。</p>
+<p>変更前バックアップを残しておくと、問題が起きた時の切り分けがかなり楽になります。</p>
+<h2>よくある失敗と対処</h2>
+<p>VLAN設定で困る時は、「通信を止めすぎた」か「分離できていない」かのどちらかが多いです。</p>
+<p>最初は、Guest → Staff遮断だけでも確認できれば十分です。</p>
+<h3>管理画面にアクセスできなくなった</h3>
+<p>firewallやVLAN設定では、自分自身の管理アクセスまで止めてしまうことがあります。</p>
+<p>最初は有線LANを1本つないだ状態で作業すると復旧しやすくなります。</p>
+<p><strong>原因:</strong> firewallの設定を誤ってLAN→ルーター間の通信を遮断した <strong>対処:</strong> 有線LAN接続でアクセスを試みる。アクセスできない場合はバックアップから復元する:</p>
+<pre><code class="language-sh">cp /etc/config/firewall.backup.YYYYMMDD /etc/config/firewall
+/etc/init.d/firewall restart</code></pre>
+<h3>GuestからLANに通信できてしまう</h3>
+<p><strong>原因:</strong> firewall forwardingルールでguestからlanへの転送が許可されている <strong>対処:</strong> <strong>Network</strong> → <strong>Firewall</strong> → <strong>Traffic Rules</strong> で <code>Block Guest to LAN</code> ルールを追加する</p>
+<h3>カメラがインターネットに接続できない</h3>
+<p><strong>原因:</strong> cameraゾーンのfirewall forwardingでwanへの転送が許可されていない <strong>対処:</strong> cameraゾーンの「Allow forward to destination zones」に <code>wan</code> を追加する</p>
+<h2>段階的に進める推奨手順</h2>
+<p>ここまでで、次の3つが確認できれば大きく外していません。最初はここまで確認できれば十分です。</p>
+<ul><li>Guest から Staff や Camera へ直接届かない</li><li>Staff から必要な機器だけにアクセスできる</li><li>管理画面へ戻れなくなるような変更をしていない</li></ul>
+<ol><li><strong>まずGuest Wi-Fiを分ける</strong>（SSIDとfirewall zoneのみ）</li><li><strong>主要機器のDHCP予約を行う</strong>（IPアドレスの把握）</li><li><strong>Cameraネットワークを追加する</strong></li><li><strong>必要なら有線ポートのVLAN割り当てを検討する</strong></li><li><strong>設定のたびにバックアップを取る</strong></li></ol>
+<p>一気に完成形を作るより、段階的に進めると問題発生時の原因特定が容易になります。</p>
+<p>特に小さなオフィスでは、「運用しながら少しずつ整理する」くらいの進め方のほうが現実的です。</p>
+<h2>まとめ</h2>
+<p>VLANによるオフィス向けネットワーク分離は、次の順番で考えると整理しやすいです:</p>
+<ol><li>ネットワーク（インターフェース）をIPアドレス範囲ごとに作成</li><li>SSIDをそれぞれのネットワークに紐付け</li><li>firewall zoneで通信の許可/拒否を設定</li><li>必要なら有線ポートのVLAN割り当てを追加</li></ol>
+<p>Guest Wi‑FiのSSID分離で始め、有線機器の分離が必要になった段階でVLANを導入する順番が安全です。</p>
+<p>最初から全部をVLAN化するより、「GuestをStaffへ入れない」「Cameraを必要最小限だけ許可する」といった整理から始めるほうが、運用しやすくなります。</p>
+<p>設定変更前のバックアップと、有線接続での作業を習慣にしてください。</p>
+<figure><img src="/blog/openwrt/assets/011/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>Guest Wi-FiがあればVLANは不要？</h3>
+<p>無線だけの分離ならGuest Wi‑Fiで足りることもあります。</p>
+<p>有線端末も含めてStaff、POS、Cameraを分けたいならVLANが必要になります。</p>
+<h3>VLANは家庭でも必要？</h3>
+<p>必須ではありません。</p>
+<p>小さなオフィスや店舗のように、用途ごとに端末を明確に分けたい環境で特に効果を発揮します。</p>
+<h3>VLAN設定はどこから始めるのが安全？</h3>
+<p>まず Guest Wi-Fi と DHCP予約で構成を整理し、そのあと Camera や Device 用ネットワークを足す流れが安全です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>OpenWrt network configuration: https://openwrt.org/docs/guide-user/network/network_configuration</li><li>OpenWrt firewall configuration: https://openwrt.org/docs/guide-user/firewall/firewall_configuration</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

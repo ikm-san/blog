@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n3c25190a8e94">バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】</a></p></blockquote>
+<h1>バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>LN6001-JPはOpenWrtベースで設定自由度が高いぶん、設定変更やアップデート前のバックアップがかなり重要です。</p>
+<p>特にIPoE、VLAN、VPN、DHCP予約などを触り始めると、「どこを戻せば復旧できるか」が分かるだけでも安心感がかなり変わります。</p>
+<p>ただし、最初から完璧なバックアップ運用を作らなくても大丈夫です。</p>
+<p>まずは「LuCIでバックアップを取る」「PCへ保存する」「重要変更前だけ個別コピーする」くらいでも、かなり復旧しやすくなります。</p>
+<p>この記事では、LN6001-JPでバックアップに含まれるもの・含まれないもの、LuCIとSSHでの保存方法、復元後に確認したいポイントを、家庭・小規模オフィス向けに整理します。</p>
+<figure><img src="/blog/openwrt/assets/023/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>LN6001-JPバックアップに含まれるもの・含まれないもの</li><li>LuCIとSSHでバックアップを取る流れ</li><li>個別ファイルだけ戻す考え方</li><li>復元後にどこを確認すると切り分けしやすいか</li></ul>
+<h2>こんな人に向いています</h2>
+<ul><li>設定変更で壊した時に戻せるようにしておきたい</li><li>ファームウェア更新前に何を保存すべきか知りたい</li><li>LuCIとSSHのどちらでバックアップすべきか迷っている</li></ul>
+<figure><img src="/blog/openwrt/assets/023/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>バックアップも、最初から完璧に管理しなくて大丈夫です。</p>
+<p>まずは次の3つを押さえれば十分です。</p>
+<ol><li>LuCI でフルバックアップを取ってPCへ保存する</li><li>重要な変更前だけ個別ファイルも控える</li><li><code>opkg list-installed</code> も別で保存する</li></ol>
+<p>バックアップ本体とパッケージ一覧が分かれているだけでも、復旧しやすさはかなり変わります。</p>
+<p>最初は「全部を自動化する」より、「戻せる状態を残す」ことを優先するほうが安全です。</p>
+<p>OpenWrt系では、「設定」と「追加パッケージ」が別管理になっている点がかなり重要です。</p>
+<h2>バックアップに含まれるもの・含まれないもの</h2>
+<table><thead><tr><th>含まれるもの</th><th>含まれないもの</th></tr></thead><tbody><tr><td><code>/etc/config/</code> 以下の全設定ファイル</td><td>opkgでインストールしたパッケージのバイナリ</td></tr><tr><td>ホスト名・パスワード・タイムゾーン</td><td><code>/tmp/</code> ディレクトリ以下（揮発性）</td></tr><tr><td>ネットワーク・Wi-Fi・firewall設定</td><td>ファームウェア本体</td></tr><tr><td>DHCP予約・DNS設定</td><td>adblockのブロックリストキャッシュ</td></tr><tr><td>VPN設定（WireGuard鍵含む）</td><td>ログファイル</td></tr></tbody></table>
+<p>最初は、「設定は戻るが、追加パッケージ本体は別」という整理だけでもかなり役立ちます。</p>
+<blockquote><p>バックアップ復元後に、opkgでインストールしたパッケージ（adblock等）は再インストールが必要になることがあります。インストール済みパッケージ一覧も合わせて保存しておくと整理しやすくなります。</p></blockquote>
+<p>---</p>
+<h2>LuCIからバックアップを取る</h2>
+<p>最初はLuCIバックアップだけでも、かなり復旧しやすさが変わります。</p>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Backup</strong> セクションの <strong>Generate archive</strong> ボタンをクリック</li><li><code>backup-openwrt-YYYY-MM-DD.tar.gz</code> という名前でPCにダウンロードされる</li></ol>
+<p>最初は「設定変更前だけバックアップする」くらいでも十分役立ちます。</p>
+<p>Linksys公式手順でも、バックアップはLuCIの <strong>System</strong> → <strong>Backup / Flash Firmware</strong> から <strong>Generate archive</strong>、復元は <strong>Upload archive</strong> を使う流れです。</p>
+<p>CLIは、この公式UI手順を補完して「何が入っているか」「追加パッケージは別に控えたか」を確認する用途で使います。</p>
+<blockquote><p><strong>推奨タイミング</strong>: 設定変更前・設定変更後・ファームウェアアップデート前</p></blockquote>
+<p>&gt;</p>
+<blockquote><p>特にfirewall、VLAN、IPoE、VPN設定変更前はバックアップを残しておくと安心です。</p></blockquote>
+<p>---</p>
+<h2>SSHからバックアップを取る</h2>
+<p>SSHバックアップは、「今の状態を丸ごと保存したい」時に便利です。</p>
+<p>CLIは、最初は設定変更より「バックアップを残す」用途で使うくらいでも十分です。</p>
+<pre><code class="language-sh"># LN6001-JPにSSH接続後、バックアップを作成
+BACKUP_NAME=&quot;/tmp/backup-ln6001-$(date +%Y%m%d-%H%M).tar.gz&quot;
+sysupgrade -b &quot;$BACKUP_NAME&quot;
+
+# バックアップ対象ファイル一覧を確認
+sysupgrade -l &gt; /tmp/sysupgrade-file-list-$(date +%Y%m%d-%H%M).txt
+
+# 破損確認用のハッシュを作成
+sha256sum &quot;$BACKUP_NAME&quot; &gt; &quot;$BACKUP_NAME.sha256&quot;
+
+# PCにバックアップファイルをコピー（PC側のターミナルで実行）
+scp root@192.168.1.1:/tmp/backup-ln6001-20260618-1200.tar.gz ~/Downloads/
+scp root@192.168.1.1:/tmp/backup-ln6001-20260618-1200.tar.gz.sha256 ~/Downloads/</code></pre>
+<p><code>sysupgrade -b</code> は、OpenWrt系でまず覚えておきたいバックアップコマンドです。</p>
+<p>または、個別設定ファイルだけバックアップする:</p>
+<pre><code class="language-sh"># 設定変更前にまとめてコピー（日付付きバックアップ）
+BACKUP_DIR=&quot;/root/config-backup-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp system; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+# バックアップ一覧確認
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>最初は「network」「wireless」「firewall」「dhcp」だけでも個別保存しておくと、かなり戻しやすくなります。</p>
+<p>---</p>
+<h2>インストール済みパッケージのリストを保存する</h2>
+<p>追加パッケージは、バックアップ復元後に消えている場合があります。</p>
+<p>ファームウェアアップデート後はパッケージが消えるため、事前にリストを保存します:</p>
+<pre><code class="language-sh"># インストール済みパッケージ一覧をファイルに出力
+opkg list-installed &gt; /tmp/installed-packages-$(date +%Y%m%d-%H%M).txt
+
+# Linksys公式/追加モジュールだけざっくり抽出
+opkg list-installed | grep -Ei &#x27;adblock|wireguard|tailscale|vpn|ipoe|map|dslite|ipip&#x27; &gt; /tmp/important-packages.txt
+
+# PCにコピー
+scp root@192.168.1.1:/tmp/installed-packages-20260618-1200.txt ~/Downloads/
+scp root@192.168.1.1:/tmp/important-packages.txt ~/Downloads/</code></pre>
+<p>最初は「Adblock」「VPN」「IPoE関連」が残っているか確認できれば十分です。</p>
+<p>---</p>
+<h2>LuCIからバックアップを復元する</h2>
+<p>バックアップがある場合は、「全部再設定」より復元のほうがかなり速いことがあります。</p>
+<ol><li><strong>System</strong> → <strong>Backup / Flash Firmware</strong> を開く</li><li><strong>Restore backup</strong> セクションの <strong>Browse</strong> をクリック</li><li>保存済みの <code>.tar.gz</code> ファイルを選択して <strong>Upload archive</strong> をクリック</li><li>確認ダイアログで <strong>Proceed</strong> をクリック</li><li>ルーターが再起動し、バックアップ時点の設定が復元される</li></ol>
+<p>最初は「LuCIへ戻れるか」を確認できるだけでもかなり重要です。</p>
+<p>---</p>
+<h2>SSHからバックアップを復元する</h2>
+<p>SSHへ入れるなら、まだかなり柔軟に復旧できます。</p>
+<pre><code class="language-sh"># PCからバックアップファイルをルーターに転送（PC側のターミナルで実行）
+scp backup-ln6001-20260618-1200.tar.gz root@192.168.1.1:/tmp/
+
+# SSHでルーターにログインして復元
+ssh root@192.168.1.1
+sysupgrade -r /tmp/backup-ln6001-20260618-1200.tar.gz</code></pre>
+<p><code>sysupgrade -r</code> は、バックアップ復元時にまず覚えておきたいコマンドです。</p>
+<p>個別設定ファイルのロールバック:</p>
+<pre><code class="language-sh"># networkだけ戻す
+cp /root/config-backup-20260618-1200/network /etc/config/network
+/etc/init.d/network restart
+
+# wirelessだけ戻す
+cp /root/config-backup-20260618-1200/wireless /etc/config/wireless
+wifi reload
+
+# firewallだけ戻す
+cp /root/config-backup-20260618-1200/firewall /etc/config/firewall
+/etc/init.d/firewall restart
+
+# 復元後の確認
+ifstatus wan 2&gt;/dev/null || true
+wifi status 2&gt;/dev/null || true
+uci show firewall | head
+logread | tail -n 80</code></pre>
+<p>最初は「networkだけ」「firewallだけ」のように、直前に変更した部分だけ戻すほうが切り分けしやすくなります。</p>
+<p>---</p>
+<h2>バックアップのタイミング・管理方法</h2>
+<p>バックアップは、「定期的」より「変更前後」で残すほうが実運用ではかなり役立ちます。</p>
+<table><thead><tr><th>タイミング</th><th>推奨アクション</th></tr></thead><tbody><tr><td>初期セットアップ完了時</td><td>必ずバックアップを取る</td></tr><tr><td>設定変更前</td><td>変更するファイルを個別バックアップ</td></tr><tr><td>設定変更後（動作確認済み）</td><td>LuCIバックアップを取ってPCに保存</td></tr><tr><td>ファームウェアアップデート前</td><td>必ずフルバックアップを取る</td></tr><tr><td>VPN鍵を生成した直後</td><td>バックアップを取る（鍵の再生成が面倒なため）</td></tr></tbody></table>
+<p>最初は、「今安定している状態」を1つ残すだけでもかなり安心感が変わります。</p>
+<p>PCの <code>~/Downloads/router-backup/</code> などへ日付付きで整理しておくと、過去設定へ戻しやすくなります。</p>
+<p>ルーター本体だけへ保存していると、本体故障時に取り出せなくなることがあります。</p>
+<p>---</p>
+<h2>よくある失敗</h2>
+<p>復元時は、「バックアップは戻ったが、周辺条件が変わっていた」というケースもあります。</p>
+<p>復元後の最初の確認は、次の3つで十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>LuCIへ再ログインできる</li><li>WANとWi‑Fiが普段どおり使える</li><li>追加パッケージ不足を把握できている</li></ul>
+<table><thead><tr><th>症状</th><th>原因</th><th>対処</th></tr></thead><tbody><tr><td>復元後にインターネットに接続できない</td><td>バックアップが回線設定変更前のもの</td><td>WANの設定を手動で再設定</td></tr><tr><td>復元後にadblockが動かない</td><td>パッケージは復元されない</td><td><code>opkg install</code> で再インストール</td></tr><tr><td>バックアップファイルが見つからない</td><td>保存先を忘れた</td><td>PCの「ダウンロード」フォルダを探す</td></tr><tr><td>復元後にWi-Fiに接続できない</td><td>SSIDやパスワードが以前の設定に戻った</td><td>以前のSSID/パスワードで再接続</td></tr></tbody></table>
+<p>最初は「インターネットへ戻れるか」を優先確認すると整理しやすくなります。</p>
+<p>復元直後は、次の確認をまとめて行うと抜け漏れを見つけやすくなります。</p>
+<pre><code class="language-sh">ubus call system board
+ifstatus wan
+ifstatus wan6
+wifi status
+opkg list-installed | grep -Ei &#x27;adblock|wireguard|tailscale|vpn|ipoe|map|dslite|ipip&#x27; || true
+logread | tail -n 100</code></pre>
+<p>---</p>
+<h2>まとめ</h2>
+<ol><li>LuCIまたは <code>sysupgrade -b</code> でバックアップを作成する</li><li>バックアップは必ずPC側にも保存する</li><li><code>opkg list-installed</code> で追加パッケージ一覧も保存する</li><li>重要変更前は <code>network</code> <code>wireless</code> <code>firewall</code> などを個別コピーする</li><li>復元後はWAN・Wi‑Fi・普段使う機能から確認する</li><li>必要なら <code>sysupgrade -r</code> や個別ファイルコピーで戻す</li></ol>
+<p>最初から完璧なバックアップ運用を作る必要はありません。</p>
+<p>「変更前に1本バックアップを取る」だけでも、設定変更への安心感はかなり変わります。</p>
+<p>特にIPoE、VLAN、VPN、firewall設定を触る前は、バックアップを残しておくと復旧がかなり楽になります。</p>
+<figure><img src="/blog/openwrt/assets/023/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>LN6001-JPのバックアップには何が入る？</h3>
+<p>主に <code>/etc/config/</code> 以下の設定が入ります。</p>
+<p>ファームウェア本体や追加パッケージ実体は別で考える必要があります。</p>
+<h3>LN6001-JPのバックアップはいつ取るべき？</h3>
+<p>設定変更の前後と、ファームウェア更新前です。</p>
+<p>特にfirewall、VLAN、IPoE、VPN変更前はかなり重要です。</p>
+<h3>LN6001-JPで復元したらすぐ元通りになる？</h3>
+<p>基本設定は戻しやすいですが、追加パッケージは再インストールが必要なことがあります。</p>
+<p><code>opkg list-installed</code> を別保存しておくと安心です。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys OpenWRT backup and restore: https://support.linksys.com/kb/article/218-en/?section_id=175</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>

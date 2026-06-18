@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小規模店舗での設定例: スタッフ・お客様・機器を分けて管理する【OpenWrt集中連載029】</title>
+<link rel="stylesheet" href="/blog/style.css">
+</head>
+<body>
+<main class="article">
+<blockquote><p>Original note.com article: <a href="https://note.com/ikmsan/n/n506a774c0680">小規模店舗での設定例: スタッフ・お客様・機器を分けて管理する【OpenWrt集中連載029】</a></p></blockquote>
+<h1>小規模店舗での設定例: スタッフ・お客様・機器を分けて管理する【OpenWrt集中連載029】</h1>
+<p>OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。</p>
+<p>この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。</p>
+<p>LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。</p>
+<p>このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。</p>
+<h2>要約</h2>
+<p>小規模店舗では、「スタッフ用」「お客様用Guest」「POSレジ・監視カメラなどの業務端末」を分けるだけでも、セキュリティと運用管理がかなり整理しやすくなります。</p>
+<p>特に店舗では、「お客様Wi‑Fiへ業務端末を混ぜない」ことがかなり重要です。</p>
+<p>ただし、最初からVLANやVPNまで全部細かく作り込まなくても大丈夫です。</p>
+<p>まずは「Staff」「Guest」「Device」を分けるだけでも、トラブル切り分けや管理はかなり楽になります。</p>
+<p>この記事では、小規模店舗で無理なく運用しやすいネットワークの分け方、固定IPやVPNを追加する順番、あとから拡張しやすい考え方をまとめます。</p>
+<figure><img src="/blog/openwrt/assets/029/diagram-01.png" alt="よくある悩み"></figure>
+<h2>この記事でわかること</h2>
+<ul><li>店舗で Staff / Guest / Device をどう分けるか</li><li>小規模店舗で無理のないネットワーク設計</li><li>固定IP管理やVPNをどの順番で足すべきか</li><li>店舗向けで後から拡張しやすい構成の考え方</li></ul>
+<h2>こんな店舗に向いています</h2>
+<ul><li>スタッフ用、来客用、業務機器用の3系統を整理したい</li><li>POSや監視カメラを来客Wi‑Fiと分けたい</li><li>小規模店舗でも後からVPNや固定IP管理を足したい</li></ul>
+<figure><img src="/blog/openwrt/assets/029/diagram-02.png" alt="考え方はシンプル"></figure>
+<h2>まずはここまでで十分</h2>
+<p>店舗構成も、最初から全部を細かく作らなくて大丈夫です。</p>
+<p>まずは次の3つで十分です。</p>
+<ol><li>Staff、Guest、Device の3系統を分ける</li><li>業務端末をGuestへ混ぜない</li><li>重要機器だけDHCP予約で固定する</li></ol>
+<p>最初は「来客用と業務用が混ざらない」状態を作るだけでも、運用はかなり安定します。</p>
+<p>最初は、「全部を高度に分離する」より、「用途ごとにざっくり分ける」くらいで十分役立ちます。</p>
+<h2>設定前に店舗の現状を保存する</h2>
+<p>店舗構成では <code>network</code>、<code>wireless</code>、<code>firewall</code>、<code>dhcp</code> をまとめて変更します。POSやカメラがある場合、設定ミスの業務影響が大きいため、作業前に必ず状態を保存します。</p>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/store-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+
+for cfg in network wireless firewall dhcp; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+cat /tmp/dhcp.leases &gt; &quot;$BACKUP_DIR/dhcp-leases.txt&quot;
+wifi status &gt; &quot;$BACKUP_DIR/wifi-status.json&quot;
+ip addr show &gt; &quot;$BACKUP_DIR/ip-addr.txt&quot;
+
+ls -l &quot;$BACKUP_DIR&quot;</code></pre>
+<p>バックアップにはSSID、MACアドレス、店舗機器名などが含まれるため、そのまま公開場所へ貼らないようにします。</p>
+<h2>店舗ネットワーク設計図</h2>
+<pre><code>インターネット
+    │
+    ONU/HGW
+    │
+    LN6001-JP（192.168.1.1）
+    ├── Staff LAN（192.168.1.0/24）  ← スタッフPC・iPadレジ・NAS
+    │     SSID: Staff-Wifi（WPA3-SAE, 非公開推奨）
+    ├── Guest（192.168.2.0/24）      ← お客様向けゲストWi-Fi
+    │     SSID: Guest-Wifi（LAN隔離）
+    └── Device（192.168.3.0/24）     ← 監視カメラ・POSレジ・スマートロック
+          SSID: Device-Wifi（LAN隔離、外部からのアクセス制限）</code></pre>
+<p>最初は、「Staff」「Guest」「Device」の3つを安定運用できればかなり十分です。</p>
+<p>---</p>
+<p>スタッフ用ネットワークは、「業務で一番安定させたいネットワーク」として考えるほうが整理しやすくなります。</p>
+<h2>ステップ1: スタッフ用ネットワーク（LAN）の設定</h2>
+<p>デフォルトのLAN（192.168.1.0/24）をスタッフ用として使います。</p>
+<ol><li>LuCI: <strong>Network</strong> → <strong>Wireless</strong> → <code>default_radio1</code>（5GHz）の <strong>Edit</strong></li><li>SSID: <code>Staff-Wifi</code>、Encryption: WPA3-SAE、強いパスワードを設定（12文字以上）</li><li><strong>Network</strong>: <code>lan</code></li></ol>
+<p>スタッフSSIDは店内掲示せず、入社時に個別共有する運用のほうが安全です。</p>
+<p>スタッフ用IPアドレス設計（DHCP Static Lease推奨）:</p>
+<table><thead><tr><th>端末</th><th>固定IP</th><th>用途</th></tr></thead><tbody><tr><td>スタッフPC</td><td>192.168.1.100〜109</td><td>業務PC</td></tr><tr><td>iPadレジ</td><td>192.168.1.110〜119</td><td>POSアプリ</td></tr><tr><td>NAS</td><td>192.168.1.200</td><td>データ共有</td></tr><tr><td>プリンター</td><td>192.168.1.201</td><td>レシートプリンター等</td></tr></tbody></table>
+<p>最初は「NAS」「POS」「プリンター」だけ固定IP化するくらいでもかなり役立ちます。</p>
+<p>固定IP設定は <strong>Network</strong> → <strong>DHCP and DNS</strong> → <strong>Static Leases</strong>（012の記事参照）から行います。</p>
+<p>---</p>
+<p>Guest Wi‑Fiは、「インターネットだけ使えるネットワーク」として考えると整理しやすくなります。</p>
+<h2>ステップ2: お客様向けゲストWi-Fiの設定</h2>
+<p>詳細は 007 の記事を参照してください。</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong>:</li></ol>
+<ul><li>Name: <code>guest</code>, Protocol: Static Address, IPv4 address: <code>192.168.2.1</code>, Netmask: <code>255.255.255.0</code></li><li><strong>DHCP Server</strong> タブ: <strong>Enable DHCP</strong> → Start: <code>100</code>, Limit: <code>100</code>, Leasetime: <code>2h</code></li></ul>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 新規SSID:</li></ol>
+<ul><li>SSID: <code>Guest-Wifi</code>（お客様に見せる名前）</li><li>Encryption: WPA2-PSK（定期的にパスワード変更する）</li><li>Network: <code>guest</code></li></ul>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <strong>Zones</strong> → <code>guest</code>ゾーン追加:</li></ol>
+<ul><li>Input: REJECT, Output: ACCEPT, Forward: REJECT</li><li>Allow forward to <code>wan</code>: チェック</li></ul>
+<ol><li>Traffic Rules: Guest → LAN方向のForwardをREJECT</li></ol>
+<pre><code class="language-sh">BACKUP_DIR=&quot;/root/store-guest-before-$(date +%Y%m%d-%H%M)&quot;
+mkdir -p &quot;$BACKUP_DIR&quot;
+for cfg in network dhcp firewall wireless; do
+  cp &quot;/etc/config/$cfg&quot; &quot;$BACKUP_DIR/$cfg&quot;
+  uci show &quot;$cfg&quot; &gt; &quot;$BACKUP_DIR/$cfg.uci.txt&quot;
+done
+
+echo &quot;### create guest network&quot;
+uci set network.guest=interface
+uci set network.guest.proto=&#x27;static&#x27;
+uci set network.guest.ipaddr=&#x27;192.168.2.1&#x27;
+uci set network.guest.netmask=&#x27;255.255.255.0&#x27;
+uci changes network
+uci commit network
+
+echo &quot;### configure guest DHCP&quot;
+uci set dhcp.guest=dhcp
+uci set dhcp.guest.interface=&#x27;guest&#x27;
+uci set dhcp.guest.start=&#x27;100&#x27;
+uci set dhcp.guest.limit=&#x27;100&#x27;
+uci set dhcp.guest.leasetime=&#x27;2h&#x27;
+uci changes dhcp
+uci commit dhcp
+/etc/init.d/dnsmasq restart</code></pre>
+<p>最初は、「Guestからインターネットだけ使える」状態を作れれば十分です。</p>
+<p>最初は「GuestからLANへ届かない」ことを確認できればかなり役立ちます。</p>
+<p>---</p>
+<p>POSや監視カメラは、「来客端末と分ける」だけでもかなり安全性が変わります。</p>
+<h2>ステップ3: 業務端末専用ネットワークの設定（POSレジ・監視カメラ）</h2>
+<p>POSレジや監視カメラは、Guestネットワークから分離します。</p>
+<ol><li><strong>Network</strong> → <strong>Interfaces</strong> → <strong>Add new interface</strong>:</li></ol>
+<ul><li>Name: <code>device</code>, Protocol: Static Address, IPv4 address: <code>192.168.3.1</code></li></ul>
+<ol><li><strong>Network</strong> → <strong>Wireless</strong> → 新規SSID:</li></ol>
+<ul><li>SSID: <code>Device-Wifi</code>（非公開SSID推奨: Hidden SSIDへチェック）</li><li>Encryption: WPA2-PSK または WPA3-SAE</li><li>Network: <code>device</code></li></ul>
+<ol><li><strong>Network</strong> → <strong>Firewall</strong> → <code>device</code>ゾーン作成（wan forward: ACCEPT, lan forward: REJECT）</li></ol>
+<p>業務端末に固定IPを設定（DHCP Static Lease）:</p>
+<table><thead><tr><th>端末</th><th>固定IP</th></tr></thead><tbody><tr><td>監視カメラ1</td><td>192.168.3.10</td></tr><tr><td>監視カメラ2</td><td>192.168.3.11</td></tr><tr><td>POSレジ端末</td><td>192.168.3.20</td></tr><tr><td>スマートロック</td><td>192.168.3.30</td></tr></tbody></table>
+<p>最初は「監視カメラ」と「POSレジ」だけ固定IP管理するくらいでも十分です。</p>
+<p>---</p>
+<p>店舗では、「外から安全に確認できる」だけでも運用がかなり楽になります。</p>
+<h2>ステップ4: スタッフが外出先からアクセスできるVPNの設定</h2>
+<ul><li><strong>固定IPあり・ポート開放可能</strong>: WireGuard（028の記事参照）</li><li><strong>IPoE・固定IPなし</strong>: Tailscale（Linksys公式VPN Assistant経由）</li></ul>
+<p>Tailscaleを使う場合は、スタッフデバイスをTailscaleアカウントへ参加させ、LN6001-JPをサブネットルーターとして設定します。</p>
+<p>スタッフ退職時は、管理コンソールからデバイスを削除します。</p>
+<p>---</p>
+<h2>設定完了後の確認チェックリスト</h2>
+<p>最初の成功条件としては、次の3つを見れば十分です。最初はここまで確認できれば大きく外していません。</p>
+<ul><li>Staffから業務機器へ正常アクセスできる</li><li>Guestから業務LANへ届かない</li><li>Deviceネットワーク機器が想定どおり動く</li></ul>
+<table><thead><tr><th>確認事項</th><th>方法</th></tr></thead><tbody><tr><td>スタッフSSIDでインターネット・NASへ接続できる</td><td>PCから確認</td></tr><tr><td>ゲストSSIDでインターネットへ接続できる</td><td>スマートフォンから確認</td></tr><tr><td>ゲストSSIDからスタッフLANのNASへ接続できない</td><td><code>ping 192.168.1.200</code> がタイムアウト</td></tr><tr><td>Device SSIDの監視カメラがクラウド接続できる</td><td>カメラアプリから確認</td></tr><tr><td>Device SSIDからスタッフPCへ接続できない</td><td><code>ping 192.168.1.100</code> がタイムアウト</td></tr></tbody></table>
+<p>最初は、「GuestがStaffへ届かない」「POSやカメラが普通に動く」の2つを確認できればかなり十分です。</p>
+<p>SSHでは、次のように確認できます。</p>
+<pre><code class="language-sh">echo &quot;### network interfaces&quot;
+uci show network | grep -E &#x27;lan|guest|device|proto|ipaddr&#x27;
+
+echo &quot;### DHCP leases&quot;
+cat /tmp/dhcp.leases
+
+echo &quot;### firewall zones&quot;
+uci show firewall | grep -E &#x27;zone|forwarding|guest|device|lan|wan&#x27;
+
+echo &quot;### Wi-Fi status&quot;
+wifi status
+
+echo &quot;### logs&quot;
+logread | grep -Ei &#x27;dnsmasq|firewall|guest|device|reject|drop&#x27; | tail -n 100</code></pre>
+<p>---</p>
+<h2>店舗運用のポイント</h2>
+<p>設定後は、次の3つが確認できれば最初の段階として十分です。</p>
+<ul><li>GuestからStaffやDeviceへ届かない</li><li>POSや監視カメラが想定どおり動く</li><li>スタッフ用Wi‑Fiだけで管理画面や業務機器へ触れられる</li></ul>
+<table><thead><tr><th>場面</th><th>推奨対応</th></tr></thead><tbody><tr><td>お客様Wi‑Fiパスワード変更</td><td>月1回程度。LuCI <strong>Network</strong> → <strong>Wireless</strong> → <strong>Edit</strong> → Key変更</td></tr><tr><td>スタッフ退職時</td><td>スタッフSSIDパスワード変更、VPN端末無効化</td></tr><tr><td>機器追加時</td><td><code>device</code>ネットワークへStatic Lease追加して固定IP管理</td></tr><tr><td>障害発生時</td><td>021 のトラブルシューティング記事を参照</td></tr></tbody></table>
+<p>最初は、「Guest隔離」と「業務機器安定動作」を優先するだけでもかなり運用しやすくなります。</p>
+<p>---</p>
+<h2>まとめ</h2>
+<p>店舗では、まず Staff、Guest、Device の3つへ分けるだけでも運用がかなり安定します。</p>
+<p>そこへ固定IP管理やVPNを必要な範囲だけ追加していくと、日々の管理とトラブル切り分けがかなりしやすくなります。</p>
+<p>最初は、「Guestを業務LANへ入れない」「POSやカメラを安定動作させる」の2つを優先するだけでも十分です。</p>
+<figure><img src="/blog/openwrt/assets/029/diagram-03.png" alt="まず見るところ"></figure>
+<h2>よくある質問</h2>
+<h3>小規模店舗ネットワークはいくつへ分けるべき？</h3>
+<p>まずは Staff、Guest、Device の3つで十分です。</p>
+<p>これだけでも管理と切り分けがかなりしやすくなります。</p>
+<h3>店舗のPOSや監視カメラはGuest Wi‑Fiと同じでもいい？</h3>
+<p>避けたほうが安全です。</p>
+<p>業務端末は来客ネットワークと分けたほうが管理しやすく、リスクも下げやすくなります。</p>
+<h3>店舗ネットワークをリモート確認したい時は何を使う？</h3>
+<p>固定IPやポート開放条件が合うならWireGuard、難しいならTailscaleを検討すると整理しやすくなります。</p>
+<h2>参考リンク</h2>
+<ul><li>Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/</li><li>Linksys WireGuard/Tailscale公式モジュール設定手順: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<h2>この連載で使っているOpenWrtルーター</h2>
+<p>この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使っています。</p>
+<p>https://amzn.to/4tVu4yG</p>
+<p>LN6001-JPは、国内向けに展開されているOpenWrtベースのWi‑Fi 7ルーターです。一般的な「自分でOpenWrtを書き込むタイプ」と違い、OpenWrtベースで最適化されたファームウェアを搭載した状態で出荷されるため、かなり導入しやすいのが特徴です。</p>
+<p>初期セットアップ済みで、基本的には電源を入れてすぐ利用可能。LuCIブラウザ管理画面、SSH、opkg、VLAN、OpenVPN、WireGuard、Tailscaleなど、OpenWrtらしい拡張性も備えています。</p>
+<p>特に日本の回線環境向けとして、Linksys公式の「オートIPoE」モジュールが用意されているのが大きなポイントです。OCNバーチャルコネクト、transixなどのIPv4 over IPv6環境でも、LuCIから比較的シンプルに設定できます。</p>
+<p>もちろんCLIで細かく調整していく楽しさもありますが、MAP-EやIPIPは設定項目がかなり多いため、「まず普通に安定して使いたい」という場合はオートIPoEを使った方がかなり楽です。</p>
+<p>この連載では、実機開発にも関わった立場から、家庭・小規模オフィス・店舗などで“実際どう使うと快適なのか” を中心に、現実的なOpenWrt運用を紹介していきます。</p>
+<h3>使用機材</h3>
+<ul><li>製品名: Linksys Velop WRT Pro 7</li><li>型番: LN6001-JP</li><li>用途: 家庭〜小規模オフィス・店舗向け OpenWrt ベースルーター</li><li>製品情報: https://support.linksys.com/kb/article/6274-jp/</li><li>IPoE設定方法: https://support.linksys.com/kb/article/6902-jp/</li><li>WireGuard / Tailscale設定方法: https://support.linksys.com/kb/article/8723-jp/</li></ul>
+<p>※設定変更前はバックアップをおすすめします。ファームウェア更新によって画面や項目名が変わる場合があるため、必要に応じてLinksys公式サポートもあわせて確認してください。</p>
+</main>
+</body>
+</html>
