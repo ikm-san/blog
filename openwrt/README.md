@@ -1,44 +1,101 @@
-# OpenWrt / Linksys Velop WRT Pro 7
+# OpenWrt / Linksys Velop WRT Pro 7 連載
 
-Public mirror of the OpenWrt and Linksys Velop WRT Pro 7 article series.
+Linksys Velop WRT Pro 7（LN6001-JP）を題材に、OpenWrtベースのルーター運用をまとめた記事シリーズです。
 
-## Articles
+家庭、小規模オフィス、店舗で使うWi-Fi、VLAN、VPN、IPoE、広告ブロック、バックアップ、トラブル対応を、実際の運用に近い順番で読めるように整理しています。
 
-- [LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】](000-hub-openwrt-guide.md)
-- [OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか【OpenWrt集中連載001】](001-openwrt-intro.md)
-- [日本でOpenWrt系Wi‑Fiルーターを使う時に技適をどう考えるか【OpenWrt集中連載002】](002-japan-technical-conformity.md)
-- [LN6001-JPとは何か: OpenWrtベースWi‑Fi 7ルーターの立ち位置【OpenWrt集中連載003】](003-ln6001-product-positioning.md)
-- [LN6001-JP初期設定チェックリスト: 買って最初に確認すること【OpenWrt集中連載004】](004-initial-setup-checklist.md)
-- [LuCIとSSHの基本: LN6001-JPで最初に触る画面とコマンド【OpenWrt集中連載005】](005-luci-ssh-basics.md)
-- [LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】](006-wifi-band-settings.md)
-- [ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】](007-guest-wifi.md)
-- [DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】](008-dns-adblock.md)
-- [LN6001-JPが快適な理由: ハードウェアアクセラレーションを理解する【OpenWrt集中連載009】](009-sqm-latency.md)
-- [家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】](010-family-filtering.md)
-- [VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】](011-vlan-office-guest.md)
-- [固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】](012-dhcp-reservations.md)
-- [WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】](013-wireguard-tailscale-remote.md)
-- [NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか【OpenWrt集中連載014】](014-ipoe-ipv4-over-ipv6.md)
-- [監視とログ: 小規模オフィスで見るべき最低限の情報【OpenWrt集中連載015】](015-monitoring-logs.md)
-- [firewall zonesの考え方: LAN/Guest/VPNを分ける基本【OpenWrt集中連載016】](016-firewall-zones.md)
-- [ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】](017-port-forwarding-caution.md)
-- [Tailscaleの使いどころ: VPNを自分で持つか任せるか【OpenWrt集中連載018】](018-tailscale-zerotier-use.md)
-- [IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】](019-ipv6-pitfalls.md)
-- [ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】](020-firmware-update.md)
-- [つながらない時の切り分け: WAN/LAN/DNS/Wi-Fiを分けて見る【OpenWrt集中連載021】](021-troubleshooting-connectivity.md)
-- [リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】](022-reset-recovery.md)
-- [バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】](023-backup-restore.md)
-- [パッケージ管理: opkgでできることとできないこと【OpenWrt集中連載024】](024-package-management.md)
-- [SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】](025-ssh-basic-commands.md)
-- [ハードウェア概要: LN6001-JPのポート・LED・ボタンの見方【OpenWrt集中連載026】](026-hardware-overview.md)
-- [自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】](027-home-configuration.md)
-- [VPN設定まとめ: WireGuard・Tailscaleの選び方と導入手順【OpenWrt集中連載028】](028-vpn-configuration.md)
-- [小規模店舗での設定例: スタッフ・お客様・機器を分けて管理する【OpenWrt集中連載029】](029-store-configuration.md)
-- [LN6001-JPレビュー: こんな人に向いている・向いていない【OpenWrt集中連載030】](030-ln6001-review-fit.md)
-- [MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】](031-mlo-setup.md)
-- [APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】](032-ap-bridge-wds.md)
-- [WindowsとMacからSSHログイン: 初回接続から鍵認証まで【OpenWrt集中連載033】](033-ssh-login-windows-mac.md)
+## 読み始めにおすすめ
 
-## Assets
+- [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](000-hub-openwrt-guide.md)
+- [OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか](001-openwrt-intro.md)
+- [日本でOpenWrt系Wi-Fiルーターを使う時に技適をどう考えるか](002-japan-technical-conformity.md)
+- [LN6001-JPとは何か: OpenWrtベースWi-Fi 7ルーターの立ち位置](003-ln6001-product-positioning.md)
+- [LN6001-JP初期設定チェックリスト](004-initial-setup-checklist.md)
 
-Images used by these articles are stored under `assets/<article-id>/`.
+## 目的別ガイド
+
+### 基本操作
+
+- [LuCIとSSHの基本](005-luci-ssh-basics.md)
+- [SSH基本コマンド集](025-ssh-basic-commands.md)
+- [WindowsとMacからSSHログイン](033-ssh-login-windows-mac.md)
+
+### Wi-Fiと家庭向け設定
+
+- [LN6001-JPのWi-Fi設定](006-wifi-band-settings.md)
+- [ゲストWi-Fiの作り方](007-guest-wifi.md)
+- [DNS広告ブロック](008-dns-adblock.md)
+- [家族向けフィルタリング](010-family-filtering.md)
+- [自宅での設定例](027-home-configuration.md)
+
+### 小規模オフィス・店舗
+
+- [VLANで社内・ゲストネットワークを分ける](011-vlan-office-guest.md)
+- [固定IPとDHCP予約](012-dhcp-reservations.md)
+- [監視とログ](015-monitoring-logs.md)
+- [firewall zonesの考え方](016-firewall-zones.md)
+- [ポート開放の注意点](017-port-forwarding-caution.md)
+- [小規模店舗での設定例](029-store-configuration.md)
+
+### VPN・リモート接続
+
+- [WireGuard/Tailscaleでリモート接続](013-wireguard-tailscale-remote.md)
+- [Tailscaleの使いどころ](018-tailscale-zerotier-use.md)
+- [VPN設定まとめ](028-vpn-configuration.md)
+
+### 回線・IPv6・IPoE
+
+- [NTT IPoEとIPv4 over IPv6](014-ipoe-ipv4-over-ipv6.md)
+- [IPv6の落とし穴](019-ipv6-pitfalls.md)
+- [つながらない時の切り分け](021-troubleshooting-connectivity.md)
+
+### 運用・復旧
+
+- [ファームウェア更新運用](020-firmware-update.md)
+- [リセットと復旧](022-reset-recovery.md)
+- [バックアップと復元](023-backup-restore.md)
+- [パッケージ管理](024-package-management.md)
+
+### ハードウェア・レビュー・応用
+
+- [ハードウェア概要](026-hardware-overview.md)
+- [LN6001-JPレビュー](030-ln6001-review-fit.md)
+- [MLOセットアップ](031-mlo-setup.md)
+- [APモード・ブリッジ・WDS](032-ap-bridge-wds.md)
+
+## 全記事一覧
+
+- [000: LN6001-JPで始めるOpenWrtベースルーター実践ガイド](000-hub-openwrt-guide.md)
+- [001: OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか](001-openwrt-intro.md)
+- [002: 日本でOpenWrt系Wi-Fiルーターを使う時に技適をどう考えるか](002-japan-technical-conformity.md)
+- [003: LN6001-JPとは何か](003-ln6001-product-positioning.md)
+- [004: LN6001-JP初期設定チェックリスト](004-initial-setup-checklist.md)
+- [005: LuCIとSSHの基本](005-luci-ssh-basics.md)
+- [006: LN6001-JPのWi-Fi設定](006-wifi-band-settings.md)
+- [007: ゲストWi-Fiの作り方](007-guest-wifi.md)
+- [008: DNS広告ブロック](008-dns-adblock.md)
+- [009: LN6001-JPが快適な理由](009-sqm-latency.md)
+- [010: 家族向けフィルタリング](010-family-filtering.md)
+- [011: VLANで社内・ゲストネットワークを分ける](011-vlan-office-guest.md)
+- [012: 固定IPとDHCP予約](012-dhcp-reservations.md)
+- [013: WireGuard/Tailscaleでリモート接続](013-wireguard-tailscale-remote.md)
+- [014: NTT IPoEとIPv4 over IPv6](014-ipoe-ipv4-over-ipv6.md)
+- [015: 監視とログ](015-monitoring-logs.md)
+- [016: firewall zonesの考え方](016-firewall-zones.md)
+- [017: ポート開放の注意点](017-port-forwarding-caution.md)
+- [018: Tailscaleの使いどころ](018-tailscale-zerotier-use.md)
+- [019: IPv6の落とし穴](019-ipv6-pitfalls.md)
+- [020: ファームウェア更新運用](020-firmware-update.md)
+- [021: つながらない時の切り分け](021-troubleshooting-connectivity.md)
+- [022: リセットと復旧](022-reset-recovery.md)
+- [023: バックアップと復元](023-backup-restore.md)
+- [024: パッケージ管理](024-package-management.md)
+- [025: SSH基本コマンド集](025-ssh-basic-commands.md)
+- [026: ハードウェア概要](026-hardware-overview.md)
+- [027: 自宅での設定例](027-home-configuration.md)
+- [028: VPN設定まとめ](028-vpn-configuration.md)
+- [029: 小規模店舗での設定例](029-store-configuration.md)
+- [030: LN6001-JPレビュー](030-ln6001-review-fit.md)
+- [031: MLOセットアップ](031-mlo-setup.md)
+- [032: APモード・ブリッジ・WDS](032-ap-bridge-wds.md)
+- [033: WindowsとMacからSSHログイン](033-ssh-login-windows-mac.md)
