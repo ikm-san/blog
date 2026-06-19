@@ -94,12 +94,7 @@ ip -6 route show
 
 ![IPoE設定の判断フロー](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/014/ipoe-decision-flow.png)
 
-| パターン | 接続構成 | LN6001-JPの設定方針 |
-|---|---|---|
-| A | モデム・HGW配下でDHCP自動接続できる | LN6001-JP側はWAN=DHCP自動でほぼそのまま使える |
-| B | ひかり電話HGW + IPv4 over IPv6（HGWがIPoE担当） | LAN IPアドレス重複に注意してDHCP自動接続 |
-| C | ONU直下 + IPv4 over IPv6（LN6001-JPがIPoE担当） | Linksys公式オートIPoEモジュールを使って設定 |
-| D | PPPoE（固定IPまたは動的IP） | WAN設定でPPPoEプロトコル・ID・パスワードを入力 |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/014/table-01.png)
 
 最初に迷いやすいのは、「HGWがすでにIPoEを担当しているのか」「LN6001-JP側でIPoE設定が必要なのか」の違いです。
 
@@ -176,15 +171,7 @@ uci commit network
 
 Linksys公式（https://support.linksys.com/kb/article/6902-jp/）に記載のある対応方式:
 
-| サービス | 方式 |
-|---|---|
-| v6プラス | MAP-E / IPIP |
-| OCNバーチャルコネクト | MAP-E |
-| BIGLOBE IPv6オプション | MAP-E |
-| transix | DS-Lite / IPIP |
-| クロスパス | DS-Lite / IPIP |
-| v6コネクト | DS-Lite / IPIP |
-| OCX光 v6IX | IPIP |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/014/table-02.png)
 
 最初は「自分のプロバイダがどの方式を使っているか」だけ分かれば十分です。
 

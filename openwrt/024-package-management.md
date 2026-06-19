@@ -125,11 +125,7 @@ df -h | grep overlay
 
 最初は、「トラブル切り分けに役立つもの」や「普段の運用を楽にするもの」から追加するほうが整理しやすくなります。
 
-| パッケージ | 機能 | 合わせてインストール |
-|---|---|---|
-| `tcpdump` | パケットキャプチャ | なし |
-| `curl` | HTTP通信確認・スクリプト取得 | なし |
-| `luci-app-ddns` | DDNS設定UI | なし |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/024/table-01.png)
 
 最初は、tcpdump のような「用途が明確で、インストール後に何を確認したいかが分かっているもの」から追加するほうが安全です。
 
@@ -194,13 +190,7 @@ tcpdump --help | head
 
 ## opkgの注意事項
 
-| 注意事項 | 詳細 |
-|---|---|
-| ファームウェアアップデートで消える | opkgインストールのバイナリはアップデートで消える。設定（/etc/config/）は残る場合がある |
-| ストレージ容量 | 約100MBのoverlayストレージ。大量のパッケージは入れない |
-| カーネルモジュール | `kmod-*` はファームウェアカーネルバージョンに依存。バージョン不一致でインストール不可の場合あり |
-| `opkg update` を忘れない | 一度もupdateせずにinstallを実行するとエラーになる |
-| LuCI拡張は再起動が必要 | `luci-app-*` インストール後はLuCIページをリロードするか、uhttpdを再起動する |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/024/table-02.png)
 
 最初は、「本当に必要なものだけ追加する」くらいで十分です。
 

@@ -102,12 +102,7 @@ cat /tmp/dhcp.leases > "$BACKUP_DIR/dhcp-leases.txt" 2>/dev/null || true
 1. LuCI: **Network** → **Wireless** → `default_radio1`（5GHz）の **Edit** をクリック
 2. **Interface Configuration** タブ:
 
-| 設定項目 | 値 |
-|---|---|
-| SSID | HomeWifi-Main |
-| Encryption | WPA3-SAE（または WPA2-PSK/WPA3-SAE mixed） |
-| Key | 任意の強いパスワード（12文字以上推奨） |
-| Network | lan |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-01.png)
 
 3. 6GHzラジオ（`default_radio2`）にも同じSSID・パスワードを設定すると、MLO対応端末が自動的に最適バンドを使用します（031の記事参照）
 
@@ -200,11 +195,7 @@ NAS、プリンター、スマートTVなどは固定割り当て（DHCP Static 
 1. **Network** → **DHCP and DNS** → **Static Leases** タブ
 2. **Add** をクリックして以下を入力:
 
-| 端末 | MACアドレス | 割り当てIP |
-|---|---|---|
-| NAS | XX:XX:XX:XX:XX:XX | 192.168.1.100 |
-| プリンター | XX:XX:XX:XX:XX:XX | 192.168.1.101 |
-| スマートTV | XX:XX:XX:XX:XX:XX | 192.168.1.102 |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-02.png)
 
 最初は「NASとプリンターだけ固定する」くらいでもかなり役立ちます。
 
@@ -247,13 +238,7 @@ LuCI: **Services** → **Adblock** で有効化・ブロックリスト選択・
 - Guestから家庭内NASや管理画面へ届かない
 - KidsやIoTを作った場合は、意図した制限だけ効いている
 
-| 確認事項 | 確認方法 |
-|---|---|
-| メインSSIDでインターネット接続できる | スマートフォンから確認 |
-| Guest SSIDからLAN側NASへ接続できないことを確認 | `ping 192.168.1.100` がタイムアウトになることを確認 |
-| KidsネットワークDNSがCloudflare Familyになっているか | `nslookup example.com 1.1.1.3` |
-| IoT端末がWANへ出られるか | スマート家電アプリから動作確認 |
-| IoT端末からNASへアクセスできないか | NAS IPへpingがタイムアウトになることを確認 |
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/027/table-03.png)
 
 最初は、「GuestがLANへ届かない」「メインSSIDが安定している」の2つを確認できればかなり十分です。
 

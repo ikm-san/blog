@@ -63,13 +63,7 @@ LN6001-JPでは、LuCIの **Network** → **Firewall** → **Port Forwards** か
 
 最初は「インターネットへ直接公開しなくても済むか」を考えるだけでもかなり重要です。
 
-| 用途 | ポート開放 | VPN代替 |
-|---|---|---|
-| 自分だけがNASにアクセス | 可能だがリスクあり | **VPN推奨** |
-| 家族だけがカメラを見る | 可能だがリスクあり | **VPN推奨** |
-| ゲームサーバーを外部公開 | 必要な場合あり | VPNでは代替不可な場合も |
-| 業務システムの要件 | 要件に従う | VPNと組み合わせる場合も |
-| リモートデスクトップ（管理のみ） | **推奨しない** | **VPN必須** |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/017/table-01.png)
 
 特に管理画面系（RDP、NAS管理UI、ルーター設定画面）は、直接公開しないほうが安全です。
 
@@ -127,15 +121,7 @@ IPoEやIPv4 over IPv6の環境では、WAN6が正常でもIPv4の外部着信条
 
 ### ステップ2: 転送ルールを設定する
 
-| フィールド | 値（NAS HTTPS公開の例） |
-|---|---|
-| Name | `NAS-HTTPS` |
-| Protocol | `TCP` |
-| Source zone | `wan` |
-| External port | `8443`（インターネット側でアクセスするポート） |
-| Destination zone | `lan` |
-| Internal IP address | `192.168.1.10`（NASのIPアドレス） |
-| Internal port | `443`（NASのHTTPSポート） |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/017/table-02.png)
 
 最初は「必要なポート1つだけ」を開けるほうが安全です。
 

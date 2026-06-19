@@ -195,12 +195,7 @@ CLIの `opkg install` は便利ですが、最初はLuCIでパッケージ名を
 1. **Services** → **Adblock** を開く
 2. **Settings** タブの主要設定:
 
-| 設定項目 | 推奨値 | 説明 |
-|---|---|---|
-| Enabled | チェック | Adblockを有効化 |
-| Force Local DNS | チェック | 端末にルーター側DNSを使わせる |
-| DNS Report | チェック | DNSリクエストとブロック状況を確認しやすくする |
-| DNS backend | `dnsmasq`（デフォルト） | LN6001-JPで標準使用 |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/008/table-01.png)
 
 3. **Blocklist Sources** タブ:
    - 利用するブロックリストにチェックを入れる

@@ -93,14 +93,7 @@ ls -l "$SNAP_DIR"
 
 確認ポイント:
 
-| 項目 | 確認内容 |
-|---|---|
-| IPv4 WAN Status | WANのIPアドレス、接続時間 |
-| IPv6 WAN Status | IPv6アドレス（IPoE環境では特に重要） |
-| Local Network | LAN側のIPアドレス |
-| Wireless | SSIDごとの接続状態、接続端末数 |
-| Memory | メモリ使用量（空きが少ない場合は要確認） |
-| CPU Load | 処理負荷（高い場合はSQM設定やパッケージを確認） |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-01.png)
 
 最初は「いつもの状態」を覚えておくことが大事です。
 
@@ -358,11 +351,7 @@ Markdownやテキストファイルで残しておくだけでも、障害時の
 
 設定変更後に問題が起きた場合、変更履歴があると原因をかなり絞りやすくなります。
 
-| 日付 | 変更内容 | 対象設定ファイル | 戻し方 |
-|---|---|---|---|
-| 2026-05-06 | Guest Wi-Fi追加 | wireless・firewall | バックアップ復元 |
-| 2026-05-10 | DHCP予約追加（nas-home） | dhcp | 予約エントリ削除 |
-| 2026-05-15 | SQM有効化 | sqm | SQM無効化 |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-02.png)
 
 ```sh
 BACKUP_DIR="/root/change-before-$(date +%Y%m%d-%H%M)"

@@ -105,16 +105,7 @@ logread | tail -n 120
 
 「つながらない」の前に、まず状況を分けます:
 
-| 症状 | 疑うべき箇所 |
-|---|---|
-| Wi-Fiに接続できない | SSID設定、パスワード、端末側Wi-Fi設定 |
-| Wi-Fi接続済みだがIPがない | DHCPサーバー、VLAN設定 |
-| IPはあるが通信できない | ルーティング、firewall、WAN接続 |
-| IPアドレスでは到達できるがドメインで開けない | DNS設定 |
-| 有線はOKだがWi-Fiだけ不安定 | 無線設定、チャンネル干渉、端末側 |
-| 特定サイトだけ遅い・見えない | adblock、DNS、IPv6経路 |
-| VPNだけつながらない | VPN設定、firewall、ポート開放 |
-| 全端末でインターネット不可 | WAN接続、IPoE設定、回線側 |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/021/table-01.png)
 
 最初は、「Wi‑Fi問題なのか」「DHCP問題なのか」「WAN問題なのか」を分けるだけでもかなり役立ちます。
 
@@ -209,12 +200,7 @@ ping -c 3 google.co.jp
 nslookup google.co.jp
 ```
 
-| テスト結果 | 原因 |
-|---|---|
-| IPへのpingが通らない | WAN接続の問題 |
-| IPへのpingは通るがドメインが失敗 | DNS設定の問題 |
-| IPv4は通るがIPv6が失敗 | IPoE/IPv6設定の問題 |
-| 全部通らない | WANまたはONU/HGW側の問題 |
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/021/table-02.png)
 
 最初は「IP直打ちで通るか」を確認するだけでも、DNS問題をかなり見分けやすくなります。
 
@@ -372,15 +358,7 @@ cp /etc/config/network.backup.YYYYMMDD-HHMM /etc/config/network
 - IPアドレスは取れているのか
 - IP直打ちでは通るのか、ドメイン名だけ失敗するのか
 
-| 症状 | 確認コマンド | よくある原因・対処 |
-|---|---|---|
-| 全端末でインターネット不可 | `ifstatus wan` | WANがdown→ONU/HGW確認、IPoE設定確認 |
-| Wi-Fiに接続できない | `wifi status` | SSID/パスワード確認、SSIDが無効になっていないか確認 |
-| IPが取れない（169.254.x.x） | `cat /tmp/dhcp.leases` | DHCPサーバー無効、VLAN設定ミス |
-| ドメインで開けない | `nslookup google.co.jp` | DNS設定確認、adblock確認 |
-| 一部サイトのみ表示されない | `logread \| grep adblock` | adblockがブロック中→ホワイトリスト追加 |
-| 設定変更後につながらない | `logread \| tail -n 50` | バックアップから設定を復元 |
-| 有線はOKだがWi-Fiが不安定 | `wifi status` | チャンネル設定・端末の再接続を試みる |
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/021/table-03.png)
 
 LuCIだけでも、かなり多くの切り分けができます。
 
@@ -388,14 +366,7 @@ LuCIだけでも、かなり多くの切り分けができます。
 
 ## LuCIの主要な状態確認画面
 
-| 確認内容 | LuCIのパス |
-|---|---|
-| WAN/Wi-Fi/メモリの概要 | Status → Overview |
-| 接続中のWi-Fi端末 | Network → Wireless → Associated Stations |
-| DHCPリース一覧 | Network → DHCP and DNS → Active DHCP Leases |
-| システムログ | Status → System Log |
-| ネットワーク設定 | Network → Interfaces |
-| ファイアウォール | Network → Firewall → Zones |
+![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/021/table-04.png)
 
 ## まとめ
 

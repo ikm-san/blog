@@ -302,13 +302,7 @@ SSHでは、「壊れている」のではなく、「IPアドレス違い」や
 
 ## よくある接続エラーと対処
 
-| エラー | 原因 | 対処 |
-|---|---|---|
-| `Connection refused` | SSHが有効になっていない | LuCI: **System** → **Administration** → SSH Accessを確認 |
-| `Host key verification failed` | ルーターリセット後に古いfingerprintが残っている | `ssh-keygen -R 192.168.1.1` でキャッシュ削除 |
-| `Permission denied (publickey)` | 鍵認証に失敗している | 公開鍵が正しく登録されているか確認 |
-| `Network is unreachable` | PCとルーターが同じネットワークにない | 有線LANで直接接続して確認 |
-| タイムアウト | LAN IPアドレスが変更されている | 変更後のIPアドレスを使用する |
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/033/table-01.png)
 
 最初は、「LAN IP違い」か「fingerprint問題」かを分けるだけでもかなり切り分けしやすくなります。
 
