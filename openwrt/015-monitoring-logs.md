@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/015-monitoring-logs.md -->
 
-> Original note.com article: [監視とログ: 小規模オフィスで見るべき最低限の情報【OpenWrt集中連載015】](https://note.com/ikmsan/n/n8571cacdde40)
-
 # 監視とログ: 小規模オフィスで見るべき最低限の情報【OpenWrt集中連載015】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

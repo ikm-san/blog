@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/016-firewall-zones.md -->
 
-> Original note.com article: [firewall zonesの考え方: LAN/Guest/VPNを分ける基本【OpenWrt集中連載016】](https://note.com/ikmsan/n/nfe0609ff7bd4)
-
 # firewall zonesの考え方: LAN/Guest/VPNを分ける基本【OpenWrt集中連載016】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

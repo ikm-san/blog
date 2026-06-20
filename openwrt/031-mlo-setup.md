@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/031-mlo-setup.md -->
 
-> Original note.com article: [MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】](https://note.com/ikmsan/n/n00750e23f49c)
-
 # MLOセットアップ: Wi‑Fi 7のマルチリンク動作を活かす【OpenWrt集中連載031】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/001-openwrt-intro.md -->
 
-> Original note.com article: [OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか【OpenWrt集中連載001】](https://note.com/ikmsan/n/n8d8823719244)
-
 # OpenWrtルーターは一般的な市販Wi-Fiルーターとは何が違うのか【OpenWrt集中連載001】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

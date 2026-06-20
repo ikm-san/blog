@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/030-ln6001-review-fit.md -->
 
-> Original note.com article: [LN6001-JPレビュー: こんな人に向いている・向いていない【OpenWrt集中連載030】](https://note.com/ikmsan/n/n3ae0dd924a6d)
-
 # LN6001-JPレビュー: こんな人に向いている・向いていない【OpenWrt集中連載030】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/013-wireguard-tailscale-remote.md -->
 
-> Original note.com article: [WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】](https://note.com/ikmsan/n/n1a83908a226c)
-
 # WireGuard/Tailscaleでリモート接続: Linksys公式モジュール前提の設計【OpenWrt集中連載013】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/014-ipoe-ipv4-over-ipv6.md -->
 
-> Original note.com article: [NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか【OpenWrt集中連載014】](https://note.com/ikmsan/n/n97ddc6c12ca8)
-
 # NTT IPoEとIPv4 over IPv6: OCNバーチャルコネクト/transixをどう設定するか【OpenWrt集中連載014】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/027-home-configuration.md -->
 
-> Original note.com article: [自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】](https://note.com/ikmsan/n/n73a7fed30751)
-
 # 自宅での設定例: 家族全員が使いやすいネットワークを組む【OpenWrt集中連載027】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

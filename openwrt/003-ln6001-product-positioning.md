@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/003-ln6001-product-positioning.md -->
 
-> Original note.com article: [LN6001-JPとは何か: OpenWrtベースWi‑Fi 7ルーターの立ち位置【OpenWrt集中連載003】](https://note.com/ikmsan/n/n1e25c8075cc2)
-
 # LN6001-JPとは何か: OpenWrtベースWi‑Fi 7ルーターの立ち位置【OpenWrt集中連載003】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

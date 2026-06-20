@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/007-guest-wifi.md -->
 
-> Original note.com article: [ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】](https://note.com/ikmsan/n/nacbd5d573d67)
-
 # ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

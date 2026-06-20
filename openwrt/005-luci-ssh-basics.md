@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/005-luci-ssh-basics.md -->
 
-> Original note.com article: [LuCIとSSHの基本: LN6001-JPで最初に触る画面とコマンド【OpenWrt集中連載005】](https://note.com/ikmsan/n/n4c7478f4efe2)
-
 # LuCIとSSHの基本: LN6001-JPで最初に触る画面とコマンド【OpenWrt集中連載005】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

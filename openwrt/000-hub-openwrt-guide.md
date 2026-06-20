@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/000-hub-openwrt-guide.md -->
 
-> Original note.com article: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】](https://note.com/ikmsan/n/ndf7569fea475)
-
 # LN6001-JPで始めるOpenWrtベースルーター実践ガイド【OpenWrt集中連載 目次】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

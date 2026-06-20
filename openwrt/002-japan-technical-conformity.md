@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/002-japan-technical-conformity.md -->
 
-> Original note.com article: [日本でOpenWrt系Wi‑Fiルーターを使う時に技適をどう考えるか【OpenWrt集中連載002】](https://note.com/ikmsan/n/n9fcf33e2b050)
-
 # 日本でOpenWrt系Wi‑Fiルーターを使う時に技適をどう考えるか【OpenWrt集中連載002】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

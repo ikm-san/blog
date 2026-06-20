@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/032-ap-bridge-wds.md -->
 
-> Original note.com article: [APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】](https://note.com/ikmsan/n/n40b623436544)
-
 # APモード・ブリッジ・WDS: LN6001-JPを既存ネットワークに組み込む【OpenWrt集中連載032】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

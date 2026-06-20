@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/006-wifi-band-settings.md -->
 
-> Original note.com article: [LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】](https://note.com/ikmsan/n/ndd6f12876bc8)
-
 # LN6001-JPのWi‑Fi設定: 2.4GHz/5GHz/6GHzをどう使い分けるか【OpenWrt集中連載006】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

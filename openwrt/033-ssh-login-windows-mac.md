@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/033-ssh-login-windows-mac.md -->
 
-> Original note.com article: [WindowsとMacからSSHログイン: 初回接続から鍵認証まで【OpenWrt集中連載033】](https://note.com/ikmsan/n/na751d7336b87)
-
 # WindowsとMacからSSHログイン: 初回接続から鍵認証まで【OpenWrt集中連載033】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

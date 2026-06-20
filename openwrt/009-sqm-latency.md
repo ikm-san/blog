@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/009-sqm-latency.md -->
 
-> Original note.com article: [LN6001-JPが快適な理由: ハードウェアアクセラレーションを理解する【OpenWrt集中連載009】](https://note.com/ikmsan/n/nbd6142be31f3)
-
 # LN6001-JPが快適な理由: ハードウェアアクセラレーションを理解する【OpenWrt集中連載009】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

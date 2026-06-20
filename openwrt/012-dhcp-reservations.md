@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/012-dhcp-reservations.md -->
 
-> Original note.com article: [固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】](https://note.com/ikmsan/n/ndd5ae853f033)
-
 # 固定IPとDHCP予約: プリンター、NAS、監視カメラを整理する【OpenWrt集中連載012】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

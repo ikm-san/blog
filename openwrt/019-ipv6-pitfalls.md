@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/019-ipv6-pitfalls.md -->
 
-> Original note.com article: [IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】](https://note.com/ikmsan/n/n61235a13b478)
-
 # IPv6の落とし穴: 家庭用ルーター感覚で見落としやすい点【OpenWrt集中連載019】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

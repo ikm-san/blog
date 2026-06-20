@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/028-vpn-configuration.md -->
 
-> Original note.com article: [VPN設定まとめ: WireGuard・Tailscaleの選び方と導入手順【OpenWrt集中連載028】](https://note.com/ikmsan/n/nb0b4b7e63309)
-
 # VPN設定まとめ: WireGuard・Tailscaleの選び方と導入手順【OpenWrt集中連載028】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

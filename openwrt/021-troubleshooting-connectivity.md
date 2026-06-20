@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/021-troubleshooting-connectivity.md -->
 
-> Original note.com article: [つながらない時の切り分け: WAN/LAN/DNS/Wi-Fiを分けて見る【OpenWrt集中連載021】](https://note.com/ikmsan/n/n1ab2d47c6d10)
-
 # つながらない時の切り分け: WAN/LAN/DNS/Wi-Fiを分けて見る【OpenWrt集中連載021】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

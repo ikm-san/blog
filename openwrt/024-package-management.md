@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/024-package-management.md -->
 
-> Original note.com article: [パッケージ管理: opkgでできることとできないこと【OpenWrt集中連載024】](https://note.com/ikmsan/n/n2bc5e8447e77)
-
 # パッケージ管理: opkgでできることとできないこと【OpenWrt集中連載024】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

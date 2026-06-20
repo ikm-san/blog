@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/017-port-forwarding-caution.md -->
 
-> Original note.com article: [ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】](https://note.com/ikmsan/n/n765ffea6ea82)
-
 # ポート開放の注意点: 公開前に確認するリスク【OpenWrt集中連載017】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

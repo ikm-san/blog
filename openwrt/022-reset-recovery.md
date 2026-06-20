@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/022-reset-recovery.md -->
 
-> Original note.com article: [リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】](https://note.com/ikmsan/n/n5088d68a2205)
-
 # リセットと復旧: 初期化前に確認すること【OpenWrt集中連載022】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

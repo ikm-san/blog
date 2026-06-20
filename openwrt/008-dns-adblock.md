@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/008-dns-adblock.md -->
 
-> Original note.com article: [DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】](https://note.com/ikmsan/n/n4759cf81d0e1)
-
 # DNS広告ブロック: LN6001-JPにAdblockを入れて設定する【OpenWrt集中連載008】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

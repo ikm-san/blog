@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/004-initial-setup-checklist.md -->
 
-> Original note.com article: [LN6001-JP初期設定チェックリスト: 買って最初に確認すること【OpenWrt集中連載004】](https://note.com/ikmsan/n/n50a565a008a0)
-
 # LN6001-JP初期設定チェックリスト: 買って最初に確認すること【OpenWrt集中連載004】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

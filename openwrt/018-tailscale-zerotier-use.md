@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/018-tailscale-zerotier-use.md -->
 
-> Original note.com article: [Tailscaleの使いどころ: VPNを自分で持つか任せるか【OpenWrt集中連載018】](https://note.com/ikmsan/n/n8d21425036a9)
-
 # Tailscaleの使いどころ: VPNを自分で持つか任せるか【OpenWrt集中連載018】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/011-vlan-office-guest.md -->
 
-> Original note.com article: [VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】](https://note.com/ikmsan/n/n516c42447850)
-
 # VLANで社内・ゲストネットワークを分ける【OpenWrt集中連載011】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

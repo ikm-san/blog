@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/020-firmware-update.md -->
 
-> Original note.com article: [ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】](https://note.com/ikmsan/n/nff6b598da354)
-
 # ファームウェア更新運用: バックアップしてから更新する【OpenWrt集中連載020】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

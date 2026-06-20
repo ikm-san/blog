@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/010-family-filtering.md -->
 
-> Original note.com article: [家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】](https://note.com/ikmsan/n/n284bb49cd1e3)
-
 # 家族向けフィルタリング: 端末別にDNSと通信ルールを分ける【OpenWrt集中連載010】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

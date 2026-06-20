@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/025-ssh-basic-commands.md -->
 
-> Original note.com article: [SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】](https://note.com/ikmsan/n/n99897dd3cae6)
-
 # SSH基本コマンド集: ルーターの状態確認と設定操作【OpenWrt集中連載025】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。

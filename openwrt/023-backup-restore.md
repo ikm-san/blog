@@ -1,7 +1,5 @@
 <!-- mirror-source: articles/023-backup-restore.md -->
 
-> Original note.com article: [バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】](https://note.com/ikmsan/n/n3c25190a8e94)
-
 # バックアップと復元: 設定を守る習慣【OpenWrt集中連載023】
 
 OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
