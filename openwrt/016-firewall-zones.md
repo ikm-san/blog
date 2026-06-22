@@ -1,378 +1,1102 @@
 <!-- mirror-source: articles/016-firewall-zones.md -->
 
-# firewall zonesの考え方: LAN/Guest/VPNを分ける基本【OpenWrt集中連載016】
+# firewall zoneは“部屋分け”で考える｜Guest・IoT・VPNを安全に通す基本【OpenWrt集中連載016】
 
-OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
+OpenWrtでゲストWi-Fi、IoT用SSID、VLAN、VPNを作り始めると、最後に必ず出てくるのが **firewall zone** です。
 
-この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。
+名前がちょっと怖いですよね。
 
-LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。
+firewall。  
+zone。  
+Input。  
+Output。  
+Forward。  
+Traffic Rules。
 
-このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。
+急にネットワーク機器っぽさが強くなります。
 
-## 要約
+でも、最初の理解はもっとラフで大丈夫です。
 
-OpenWrt系のfirewall zoneは、「どこからどこへ通信してよいか」を整理するための仕組みです。
+firewall zoneは、ざっくり言うと **部屋分け** です。
 
-LAN・Guest・IoT・VPNなどを別々の「ゾーン」として扱うことで、来客端末から社内LANへのアクセスを制限したり、IoT機器をNASやPCから切り離したりできます。
+```txt
+lan    = 家族や社内端末の部屋
+guest  = ゲストWi-Fiの部屋
+iot    = スマート家電の部屋
+device = カメラや設備機器の部屋
+vpn    = 外から入ってくる専用通路
+wan    = インターネットへの出口
+```
 
-ただし、最初から細かなTraffic Rulesを大量に作る必要はありません。
+そしてfirewallは、
 
-まずは「GuestからLANへ届かない」「IoTから社内端末へ届かない」くらいを整理できれば、家庭や小さなオフィスではかなり十分です。
+```txt
+どの部屋から、どの部屋へ行っていいか
+```
 
-LN6001-JPでは、LuCIの **Network** → **Firewall** から、ゾーンと転送ルールを視覚的に管理できます。
+を決める仕組みです。
 
-この記事では、firewall zone の考え方、LAN/Guest/IoT/VPNの分け方、壊しにくい進め方を、家庭・小規模オフィス向けに整理します。
+ゲストWi-Fiはインターネットへ出ていい。  
+でもNASやプリンターの部屋には入れない。
+
+IoT機器はクラウドへ出ていい。  
+でも親のPCや社内PCへ勝手に入らない。
+
+VPNは便利だけど、LAN全体へ広く入れるのではなく、NASだけ、LuCIだけ、管理PCだけに絞る。
+
+こう考えると、firewall zoneはそこまで怖くありません。
+
+この記事では、Linksys Velop WRT Pro 7（LN6001-JP）で、LAN、Guest、IoT / Device、VPNをどう分けるか、Input / Output / Forwardをどう読めばよいか、そして壊しにくく設定する順番をまとめます。
+
+> この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使いながら、家庭・小さなオフィス・店舗でOpenWrtベースルーターを現実的に使う方法をまとめています。  
+> 連載目次: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](https://note.com/ikmsan/n/ndf7569fea475)
+
+## 今日のゴール
+
+この記事のゴールは、firewallを完全に理解することではありません。
+
+まずは、ここまで分かればOKです。
+
+- firewall zoneを「部屋分け」として考えられる
+- Input / Output / Forwardの違いがざっくり分かる
+- Guest、IoT / Device、VPNの基本方針を決められる
+- GuestやIoTでDHCP / DNS許可が必要な理由が分かる
+- LuCIでzoneとforwardingを確認できる
+- UCIでfirewall設定を読む・控える・小さく変更できる
+- 設定後に「届くべきところ」と「届かないべきところ」を確認できる
+- firewallで迷子になった時の戻し方が分かる
+
+firewallで大事なのは、いきなり細かいルールを大量に作ることではありません。
+
+まず、
+
+```txt
+GuestからLANへ入れない
+IoTからLANへ勝手に入れない
+VPNから入れる範囲を広げすぎない
+```
+
+ここを作るだけでかなり実用的です。
 
 ![よくある悩み](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/diagram-01.png)
 
-## この記事でわかること
+## 先にざっくり結論
 
-- firewall zone が何を分ける仕組みなのか
-- LAN、Guest、IoT、VPN の通信方針をどう考えるか
-- ゾーン設定で壊しにくく進める考え方
-- Traffic Rules をどこまで細かく作るべきか
+firewall zoneは、ネットワークごとに通信ルールをまとめる場所です。
 
-## こんな人に向いています
-
-- Guest、IoT、VPN の通信をLANと分けたい
-- firewall zone の考え方が抽象的でつかみにくい
-- ルールを増やす前に通信方針を整理したい
-
-![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/diagram-02.png)
-
-## まずはここまでで十分
-
-firewallも、最初から細かなTraffic Rulesを増やす必要はありません。
-
-まずは次の3つで十分です。
-
-1. LAN、Guest、IoT の通信方針を決める
-2. ゾーンを分ける
-3. GuestやIoTからLANへ行けないことを確認する
-
-最初は「全部を制御する」より、「不要な方向へ届かない」ことを確認するほうが大事です。
-
-先に通信方針を決めてから設定するだけでも、かなり壊しにくくなります。
-
-## 用語ミニ解説
-
-- firewall zone: 通信ルールを管理するためのグループです。LAN、WAN、Guest などのネットワークを区分けします。
-- Forwarding: ゾーン間の通信の許可・拒否を設定するルールです。
-- Traffic Rules: 特定のポートや送信元/宛先を条件にした通信ルールです。
-- Input: そのゾーンからルーター自身への通信（ルーター管理画面へのアクセスなど）。
-- Output: ルーターからそのゾーンへの通信。
-- Forward: そのゾーンを経由して他のゾーンへ転送される通信。
-
-最初は「zone = 通信グループ」くらいで整理すると分かりやすいです。
-
-LAN、Guest、IoTごとに「どこへ行ってよいか」を決めるイメージです。
-
-## デフォルトのゾーン設定
-
-LN6001-JPの工場出荷時のファイアウォール設定:
+最初は、この方針で十分です。
 
 ![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-01.png)
 
-LAN→WANへの転送（インターネット接続）はForwardingルールで許可されています。
+特に大事なのは、GuestやIoTの **Input** を `REJECT` にした時です。
 
-最初は、この「lan → wan」だけでも理解できれば十分です。
+Inputを `REJECT` にすると、そのzoneからルーター自身への通信も拒否されます。
 
-## ゾーン設計の考え方
+つまり、そのままだと次も止まります。
 
-ネットワーク分離を設計する前に、まず通信方針を決めます。
+```txt
+Guest端末 → ルーターのDHCP
+Guest端末 → ルーターのDNS
+```
 
-ここを先に整理しておくと、「なぜそのルールを作ったか」を後から見返しやすくなります。
+これを忘れると、
+
+```txt
+ゲストWi-FiにはつながるのにIPが取れない
+IPはあるのにWebサイトが開けない
+```
+
+という状態になります。
+
+なので、GuestやIoTでは、DHCPとDNSだけ明示的に許可します。
+
+```txt
+Allow-Guest-DHCP
+Allow-Guest-DNS
+Allow-Device-DHCP
+Allow-Device-DNS
+```
+
+ここが分かると、ゲストWi-Fi、VLAN、VPNの記事がかなり読みやすくなります。
+
+## こういう人向けです
+
+この記事は、次のような人向けです。
+
+- ゲストWi-Fiを家庭内LANや業務LANから分けたい
+- IoT機器やカメラを親のPCやNASから分けたい
+- VPNで入った端末のアクセス範囲を絞りたい
+- Input / Output / Forwardが何を意味するのか分かりにくい
+- Traffic Rulesを増やす前に、通信方針を整理したい
+- VLANやゲストWi-Fiを作ったあと、本当に分離できているか確認したい
+- firewall設定でLuCIに戻れなくなるのが怖い
+
+逆に、すでにOpenWrtのUCI / iptables / zone設計に慣れている人には基本寄りです。
+
+ただ、家庭や小さなオフィス、店舗では、この基本が一番効きます。
+
+![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/diagram-02.png)
+
+## 最初に言葉だけそろえる
+
+firewallまわりの言葉を、ざっくり整理します。
 
 ![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-02.png)
 
-最初は、「Guest → LAN拒否」だけでもかなり意味があります。
+最初は、これだけ覚えれば大丈夫です。
 
-IoTやVPNは、必要になってから段階的に追加していくほうが整理しやすくなります。
+```txt
+zone = 部屋
+forwarding = 部屋から部屋への通行許可
+Traffic Rules = 例外ルール
+```
 
-方針を決めてから設定を進めると、後からルールの意図が分かりやすくなります。
+## Input / Output / Forwardはこう見る
 
-最初からTraffic Rulesを大量追加するより、「どのゾーン間を許可するか」を先に決めるほうが壊しにくいです。
+firewall zoneで混乱しやすいのが、Input、Output、Forwardです。
 
-OpenWrt系では、「ネットワーク」「SSID」「firewall zone」を組み合わせて分離を作ります。
-
-最初は少し複雑に見えますが、役割ごとに分かれているぶん、あとから整理しやすい構成になっています。
-
-## 新しいゾーンを作る手順（LuCI）
-
-Guest・IoT・VPN用のゾーンを追加する手順です。
-
-### ステップ1: ゾーンを追加する
-
-1. **Network** → **Firewall** → **Zones** タブを開く
-2. **Add** をクリック
-3. 以下を設定:
+ポイントは、**ルーター自身から見た向き**で考えることです。
 
 ![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-03.png)
 
-4. **Save & Apply**
+たとえば、guest zoneをこう設定したとします。
 
-ここで作っているのは、「guestネットワーク専用の通信ルール」です。
+```txt
+Input: REJECT
+Output: ACCEPT
+Forward: REJECT
+Forwarding: guest → wan
+```
 
-guest側だけInputやForwardを制限することで、LANとは違う扱いにできます。
-
-`Input: REJECT` にすることで、来客端末からルーター自身（管理画面443、80番ポート）へのアクセスも拒否されます。
-
-最初は「Guestから管理画面へ入れない」だけでもかなり安全性が上がります。
-
-### ステップ2: ゾーン間のForwardingを確認する
-
-1. **Network** → **Firewall** → **Forwarding** タブ
-2. 許可されているゾーン間転送が表示される
-3. 不要な転送が許可されていないか確認
-
-最初は、「guest → lan」が許可されていないことだけ確認できれば十分です。
-
-### ステップ3: 追加のTraffic Rulesを設定する
-
-Traffic Rulesは、「特定通信だけ例外的に許可・拒否したい」時に使います。
-
-最初から大量に作りすぎると、あとから何を許可したか分からなくなりやすいです。
-
-1. **Network** → **Firewall** → **Traffic Rules** → **Add**
-2. Name: ルールの説明
-3. Source zone / Destination zone を選択
-4. Protocol / Destination port を設定
-5. Action: `ACCEPT` または `REJECT`
-
-例: Guestからルーター管理画面（443番）へのアクセスを拒否:
+この意味はこうです。
 
 ![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-04.png)
 
-最初は、Traffic Rulesよりzone設計を優先したほうが整理しやすくなります。
+ここ、かなり大事です。
 
-## UCIコマンドでゾーンを設定する
+Guest zoneのInputを `REJECT` にすると、管理画面やSSHを閉じられます。
 
-firewall zone はCLIでも設定できますが、最初はLuCIから設定したほうが構成を理解しやすいです。
+でも、DHCPやDNSまで一緒に止まります。
 
-CLIを使う場合も、まず現在設定を確認してから変更するほうが安全です。
+だからDHCPとDNSだけ、Traffic Rulesで開けます。
 
-### 変更前に現在の状態を保存する
+## デフォルトのlan / wanを理解する
 
-firewallはネットワーク全体へ影響するため、変更前に設定ファイルと現在の適用状態をまとめて保存しておくと戻しやすくなります。
+OpenWrt系では、基本的に `lan` と `wan` のzoneから始まります。
+
+![表画像 table-05](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-05.png)
+
+さらに、`lan → wan` のforwardingがあることで、LAN端末はインターネットへ出られます。
+
+ざっくり言うと、初期状態はこうです。
+
+```txt
+LAN端末 → ルーター自身: 許可
+LAN端末 → インターネット: 許可
+インターネット → ルーター自身: 原則拒否
+インターネット → LAN端末: 原則拒否
+```
+
+家庭や小さなオフィスでは、この `lan` に親のPC、スマートフォン、NAS、プリンター、管理端末などが入ります。
+
+そこへあとから、Guest、IoT、Device、VPNを追加していくイメージです。
+
+## zone設計の基本
+
+新しいzoneを作る前に、まず通信方針を決めます。
+
+firewall設定で一番大事なのは、コマンドを覚えることではありません。
+
+```txt
+何を通して
+何を通さないか
+```
+
+を先に決めることです。
+
+## 家庭向けの例
+
+![表画像 table-06](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-06.png)
+
+家庭では、最初から全部を作らなくて大丈夫です。
+
+まずGuest。  
+必要になったらIoT。  
+子ども用端末を分けたくなったらKids。  
+外出先から入りたくなったらVPN。
+
+この順番で十分です。
+
+## 小さなオフィス・店舗向けの例
+
+![表画像 table-07](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-07.png)
+
+店舗では、GuestからStaffへ届かないことがかなり大事です。
+
+DeviceからStaffへ勝手に入らないことも大事です。
+
+POSや決済端末は、カメラやスマート家電と同じノリでDeviceへ混ぜないほうが安全です。
+
+ベンダー要件を先に確認してください。
+
+## 通信方針を表にする
+
+設定前に、こういう表を作っておくと迷いにくくなります。
+
+![表画像 table-08](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-08.png)
+
+この表があると、あとから
+
+```txt
+このルール、何のために作ったんだっけ？
+```
+
+となりにくいです。
+
+firewall設定は、半年後の自分がかなり忘れます。
+
+メモは本当に大事です。
+
+## 設定前にバックアップを取る
+
+firewall設定は、間違えるとインターネットへ出られなくなったり、LuCIへ戻れなくなったりします。
+
+なので、触る前に必ずバックアップを取ります。
+
+LuCIでは次です。
+
+1. **System** → **Backup / Flash Firmware** を開く
+2. **Generate archive** をクリックする
+3. `.tar.gz` ファイルをPCへ保存する
+4. ファイル名に日付と状態を入れる
+
+例:
+
+```txt
+backup-LN6001-before-firewall-zones-20260621.tar.gz
+```
+
+SSHで状態メモも残すなら、次を実行します。
 
 ```sh
 BACKUP_DIR="/root/firewall-before-$(date +%Y%m%d-%H%M)"
 mkdir -p "$BACKUP_DIR"
 
-cp /etc/config/firewall "$BACKUP_DIR/firewall"
-cp /etc/config/network "$BACKUP_DIR/network"
-cp /etc/config/dhcp "$BACKUP_DIR/dhcp"
+for cfg in network wireless firewall dhcp; do
+  cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
+  uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
+done
 
-uci show firewall > "$BACKUP_DIR/uci-firewall.txt"
-uci show network > "$BACKUP_DIR/uci-network.txt"
+ip addr show > "$BACKUP_DIR/ip-addr.txt"
+ip route show > "$BACKUP_DIR/route-v4.txt"
+ip -6 route show > "$BACKUP_DIR/route-v6.txt"
 iptables-save > "$BACKUP_DIR/iptables-save.txt" 2>/dev/null || true
-nft list ruleset > "$BACKUP_DIR/nft-ruleset.txt" 2>/dev/null || true
-logread | tail -n 120 > "$BACKUP_DIR/logread-before.txt"
+ip6tables-save > "$BACKUP_DIR/ip6tables-save.txt" 2>/dev/null || true
 
-echo "backup: $BACKUP_DIR"
+logread | tail -n 200 > "$BACKUP_DIR/logread-tail.txt"
+
+ls -l "$BACKUP_DIR"
 ```
 
-LN6001-JPのOpenWrt/QSDK系環境では、iptables互換コマンドで見える場合とnft側で見える場合があります。
+このバックアップには、SSID、Wi-Fiパスワード、IPアドレス、firewall設定、端末情報が含まれることがあります。
 
-どちらか一方だけに決め打ちせず、確認できるほうを残しておくと後から比較しやすくなります。
+そのままSNS、公開リポジトリ、記事スクリーンショットへ出さないでください。
+
+OpenWrtで一番強い人は、firewallを全部暗記している人ではありません。
+
+戻せる人です。
+
+## LuCIでguest zoneを作る
+
+ここでは、すでに `guest` networkとゲストSSIDを作っている前提で、guest zoneを作ります。
+
+ゲストWi-Fiの作成手順は007の記事で扱っています。
+
+## ステップ1: guest zoneを追加する
+
+1. **Network** → **Firewall** を開く
+2. **Zones** タブを開く
+3. **Add** をクリックする
+4. 次のように設定する
+
+![表画像 table-09](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-09.png)
+
+5. **Inter-Zone Forwarding** で次を設定する
+
+![表画像 table-10](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-10.png)
+
+6. **Save** をクリックする
+
+この設定で、guestからwanへは出られます。
+
+一方で、guestからlanへは転送しません。
+
+つまり、
+
+```txt
+ゲストWi-Fi → インターネット: OK
+ゲストWi-Fi → LAN内NAS: NG
+ゲストWi-Fi → 管理画面: NG
+```
+
+を目指す構成です。
+
+ただし、このままだとDHCPとDNSも使えない可能性があります。
+
+なので次に、DHCPとDNSだけ許可します。
+
+## ステップ2: DHCPとDNSだけ許可する
+
+guest zoneのInputを `REJECT` にした場合、ゲスト端末からルーター自身への通信は原則拒否されます。
+
+ただし、ゲスト端末には最低限この2つが必要です。
+
+```txt
+DHCP = IPアドレスをもらう
+DNS  = example.com のような名前を解決する
+```
+
+この2つだけ開けます。
+
+## DHCPを許可する
+
+1. **Network** → **Firewall** → **Traffic Rules** を開く
+2. **Add** をクリックする
+3. 次のように設定する
+
+![表画像 table-11](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-11.png)
+
+4. **Save** をクリックする
+
+## DNSを許可する
+
+1. **Traffic Rules** で **Add** をクリックする
+2. 次のように設定する
+
+![表画像 table-12](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-12.png)
+
+3. **Save** をクリックする
+
+これで、ゲスト端末はIPアドレスを取得し、DNSを使えます。
+
+一方で、LuCIやSSHなどの管理系通信は許可していないため、ゲスト端末から管理画面へ入りにくい構成になります。
+
+## ステップ3: Save & Applyする
+
+設定が終わったら、LuCI上部の保留中の変更を確認し、**Save & Apply** をクリックします。
+
+firewall反映後、Wi-Fiや通信が一時的に不安定に見えることがあります。
+
+すぐにリセットボタンを押さなくて大丈夫です。
+
+まず、有線LANの管理端末からLuCIへ入れるか確認します。
+
+## GuestからLANへ入れないことを確認する
+
+firewallは、設定画面だけ見ても安心できません。
+
+必ず実端末で確認します。
+
+ゲストWi-Fiに接続したスマートフォンやPCで、次を確認します。
+
+![表画像 table-13](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-13.png)
+
+PCから確認する例です。
 
 ```sh
-# 現在の設定を確認
+ping -c 4 8.8.8.8
+ping -c 4 example.com
+ping -c 4 192.168.1.1
+ssh root@192.168.1.1
+```
+
+期待する状態はこうです。
+
+```txt
+8.8.8.8 / example.com → 通る
+192.168.1.1 / NAS / SSH → 通らない
+```
+
+「インターネットへ出られる」だけでは不十分です。
+
+「LANへ届かない」ことまで確認します。
+
+## IoT / Device zoneを作る考え方
+
+IoT機器やカメラも、guestと似た考え方で分けられます。
+
+ただし、GuestとIoT / Deviceでは通信要件が違います。
+
+![表画像 table-14](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-14.png)
+
+IoT機器は、メーカーのクラウドへ出る必要があるものもあります。
+
+一方で、LAN内の録画機だけに接続できればよいカメラもあります。
+
+なので、Device zoneでは次の方針が分かりやすいです。
+
+- IoT / DeviceからLANへは原則拒否
+- IoT / DeviceからWANへは機器要件に応じて許可
+- LAN / StaffからIoT / Deviceへは、必要な機器だけ許可
+- カメラや録画機はDHCP予約でIPを固定する
+- POSや決済端末はDeviceへ雑に混ぜない
+
+Device zoneもInputを `REJECT` にする場合、DHCPとDNSの許可が必要です。
+
+```txt
+Allow-Device-DHCP
+Allow-Device-DNS
+```
+
+この2つを忘れると、IoT機器がIPを取れなかったり、クラウドへ出られなかったりします。
+
+## VPN zoneを作る考え方
+
+VPNは、外出先から内側へ入る入口です。
+
+便利ですが、アクセス範囲を広げすぎないことが大事です。
+
+ありがちな失敗はこれです。
+
+```txt
+VPN → LAN全体を許可
+VPN → Device全体も許可
+VPN → 管理画面も全部許可
+```
+
+自分専用ならまだしも、家族やスタッフの端末もVPNへ入る場合は、少し広すぎることがあります。
+
+最初は、目的ごとに小さく許可します。
+
+![表画像 table-15](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-15.png)
+
+VPN zoneを作る場合は、`vpn → lan` を広く許可する前に、どの宛先が本当に必要かを決めます。
+
+WireGuardやTailscaleの記事と合わせて確認してください。
+
+## Traffic Rulesは“例外”に使う
+
+Traffic Rulesは、zone間の大きな方針を作ったあと、必要な通信だけを例外として許可するために使います。
+
+たとえば、こんな用途です。
+
+![表画像 table-16](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-16.png)
+
+最初からTraffic Rulesを大量に作ると、あとで自分が混乱します。
+
+まずはzone間の大きな方針。
+
+そのあと、必要な通信だけTraffic Rulesで追加。
+
+この順番が安全です。
+
+## UCIでguest zoneを作る例
+
+ここからはCLIで作りたい人向けです。
+
+最初はLuCIで設定するほうが安全です。
+
+UCIで作る場合も、まず現在の状態を確認します。
+
+```sh
+echo "### current firewall"
 uci show firewall
 
-# 新しいゾーン（guest）を追加
-uci add firewall zone
-uci set firewall.@zone[-1].name='guest'
-uci set firewall.@zone[-1].input='REJECT'
-uci set firewall.@zone[-1].output='ACCEPT'
-uci set firewall.@zone[-1].forward='REJECT'
-uci add_list firewall.@zone[-1].network='guest'
+echo "### current networks"
+uci show network | grep -E 'interface|device|proto|ipaddr'
 
-# guestからwanへの転送を許可
-uci add firewall forwarding
-uci set firewall.@forwarding[-1].src='guest'
-uci set firewall.@forwarding[-1].dest='wan'
+echo "### current wireless mapping"
+uci show wireless | grep -E 'ssid|network'
+```
 
-# guest端末がIPアドレスを取得できるようDHCPを許可
-uci add firewall rule
-uci set firewall.@rule[-1].name='Allow-Guest-DHCP'
-uci set firewall.@rule[-1].src='guest'
-uci set firewall.@rule[-1].proto='udp'
-uci set firewall.@rule[-1].dest_port='67-68'
-uci set firewall.@rule[-1].target='ACCEPT'
+以下は、`guest` networkがすでに存在する前提で、guest zoneとDHCP / DNS許可を作る例です。
 
-# guest端末がルーターのDNSを使えるようDNSを許可
-uci add firewall rule
-uci set firewall.@rule[-1].name='Allow-Guest-DNS'
-uci set firewall.@rule[-1].src='guest'
-uci set firewall.@rule[-1].proto='tcpudp'
-uci set firewall.@rule[-1].dest_port='53'
-uci set firewall.@rule[-1].target='ACCEPT'
+```sh
+BACKUP_DIR="/root/firewall-guest-before-$(date +%Y%m%d-%H%M)"
+mkdir -p "$BACKUP_DIR"
 
-# guestからlanへの転送を明示的に拒否するルールを追加
-uci add firewall rule
-uci set firewall.@rule[-1].name='Block Guest to LAN'
-uci set firewall.@rule[-1].src='guest'
-uci set firewall.@rule[-1].dest='lan'
-uci set firewall.@rule[-1].target='REJECT'
+for cfg in network wireless firewall dhcp; do
+  cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
+  uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
+done
 
-# 反映前に差分を確認
+# guest zone
+uci -q delete firewall.guest
+uci set firewall.guest="zone"
+uci set firewall.guest.name="guest"
+uci set firewall.guest.network="guest"
+uci set firewall.guest.input="REJECT"
+uci set firewall.guest.output="ACCEPT"
+uci set firewall.guest.forward="REJECT"
+
+# guest -> wan
+uci -q delete firewall.guest_wan
+uci set firewall.guest_wan="forwarding"
+uci set firewall.guest_wan.src="guest"
+uci set firewall.guest_wan.dest="wan"
+
+# DHCP
+uci -q delete firewall.guest_dhcp
+uci set firewall.guest_dhcp="rule"
+uci set firewall.guest_dhcp.name="Allow-Guest-DHCP"
+uci set firewall.guest_dhcp.src="guest"
+uci set firewall.guest_dhcp.proto="udp"
+uci set firewall.guest_dhcp.src_port="68"
+uci set firewall.guest_dhcp.dest_port="67"
+uci set firewall.guest_dhcp.family="ipv4"
+uci set firewall.guest_dhcp.target="ACCEPT"
+
+# DNS
+uci -q delete firewall.guest_dns
+uci set firewall.guest_dns="rule"
+uci set firewall.guest_dns.name="Allow-Guest-DNS"
+uci set firewall.guest_dns.src="guest"
+uci set firewall.guest_dns.proto="tcp udp"
+uci set firewall.guest_dns.dest_port="53"
+uci set firewall.guest_dns.target="ACCEPT"
+
+echo "### pending firewall changes"
 uci changes firewall
 
 uci commit firewall
 /etc/init.d/firewall restart
 
-# 反映後の確認
-uci show firewall | grep -E "guest|Allow-Guest|Block Guest"
-logread | grep -i 'firewall\|reject\|drop' | tail -n 50
+echo "### verify"
+uci show firewall | grep -E 'guest|Allow-Guest'
+logread | grep -Ei 'firewall|guest|reject|drop' | tail -n 80
 ```
 
-`uci show firewall` は、まず最初に確認したいコマンドです。
+この例では、`guest → lan` のforwardingを作っていません。
 
-CLIは、最初は設定変更より「今どう分離されているか」を確認する用途で使うくらいでも十分です。
+そのため、guestからlanへは原則届かない構成になります。
 
-## 現在のファイアウォール状態を確認する
+## UCIでDevice zoneを作る例
 
-設定後は、「本当に想定どおりに通信が止まっているか」を確認することが大事です。
+Deviceネットワークを作っている場合も同じ考え方です。
+
+ここでは `device` networkがすでに存在する前提です。
 
 ```sh
-# 全体の設定確認
+BACKUP_DIR="/root/firewall-device-before-$(date +%Y%m%d-%H%M)"
+mkdir -p "$BACKUP_DIR"
+
+cp /etc/config/firewall "$BACKUP_DIR/firewall"
+uci show firewall > "$BACKUP_DIR/firewall.uci.txt"
+
+# device zone
+uci -q delete firewall.device
+uci set firewall.device="zone"
+uci set firewall.device.name="device"
+uci set firewall.device.network="device"
+uci set firewall.device.input="REJECT"
+uci set firewall.device.output="ACCEPT"
+uci set firewall.device.forward="REJECT"
+
+# device -> wan
+# クラウド接続が必要な機器がある場合だけ有効化する
+uci -q delete firewall.device_wan
+uci set firewall.device_wan="forwarding"
+uci set firewall.device_wan.src="device"
+uci set firewall.device_wan.dest="wan"
+
+# DHCP
+uci -q delete firewall.device_dhcp
+uci set firewall.device_dhcp="rule"
+uci set firewall.device_dhcp.name="Allow-Device-DHCP"
+uci set firewall.device_dhcp.src="device"
+uci set firewall.device_dhcp.proto="udp"
+uci set firewall.device_dhcp.src_port="68"
+uci set firewall.device_dhcp.dest_port="67"
+uci set firewall.device_dhcp.family="ipv4"
+uci set firewall.device_dhcp.target="ACCEPT"
+
+# DNS
+uci -q delete firewall.device_dns
+uci set firewall.device_dns="rule"
+uci set firewall.device_dns.name="Allow-Device-DNS"
+uci set firewall.device_dns.src="device"
+uci set firewall.device_dns.proto="tcp udp"
+uci set firewall.device_dns.dest_port="53"
+uci set firewall.device_dns.target="ACCEPT"
+
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+```
+
+DeviceからWANへ出したくない場合は、`firewall.device_wan` を作らない、またはLuCIでforwardingを外します。
+
+防犯カメラ、録画機、スマート家電は、WAN接続が必要かどうかを機器ごとに確認してください。
+
+## StaffからDeviceへ必要な通信だけ許可する
+
+カメラや録画機をDeviceネットワークへ置いた場合、Staff側から管理画面へ入りたいことがあります。
+
+この時、device → lanを許可する必要はありません。
+
+Staffから特定のDevice機器へだけ許可します。
+
+例: Staff LANから録画機 `192.168.3.20` のWeb管理画面だけ許可する。
+
+```sh
+cp /etc/config/firewall /etc/config/firewall.backup.before-staff-device.$(date +%Y%m%d-%H%M)
+
+uci -q delete firewall.staff_to_nvr
+uci set firewall.staff_to_nvr="rule"
+uci set firewall.staff_to_nvr.name="Allow-Staff-to-NVR-Web"
+uci set firewall.staff_to_nvr.src="lan"
+uci set firewall.staff_to_nvr.dest="device"
+uci set firewall.staff_to_nvr.dest_ip="192.168.3.20"
+uci set firewall.staff_to_nvr.proto="tcp"
+uci set firewall.staff_to_nvr.dest_port="80 443"
+uci set firewall.staff_to_nvr.target="ACCEPT"
+
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+```
+
+カメラや録画機によって必要なポートは違います。
+
+ベンダーのマニュアルや実機の通信要件を確認してください。
+
+## VPNからNASだけ許可する例
+
+VPNからLAN全体ではなく、NASだけ使わせたい場合の考え方です。
+
+例: VPN zoneからNAS `192.168.1.10` だけ許可する。
+
+```sh
+cp /etc/config/firewall /etc/config/firewall.backup.before-vpn-nas.$(date +%Y%m%d-%H%M)
+
+uci -q delete firewall.vpn_to_nas
+uci set firewall.vpn_to_nas="rule"
+uci set firewall.vpn_to_nas.name="Allow-VPN-to-NAS"
+uci set firewall.vpn_to_nas.src="vpn"
+uci set firewall.vpn_to_nas.dest="lan"
+uci set firewall.vpn_to_nas.dest_ip="192.168.1.10"
+uci set firewall.vpn_to_nas.proto="tcp"
+uci set firewall.vpn_to_nas.dest_port="22 80 443 445"
+uci set firewall.vpn_to_nas.target="ACCEPT"
+
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+```
+
+この例では、NASのSSH、Web管理画面、SMBを想定しています。
+
+実際に必要なポートだけ残してください。
+
+VPNからLAN全体へforwardingを作る場合は便利ですが、アクセス範囲は広くなります。
+
+最初はNASだけ、LuCIだけ、管理PCだけのように狭く始めるのがおすすめです。
+
+## 設定後に確認するコマンド
+
+firewall設定後は、LuCIだけでなくCLIでも状態を読みます。
+
+```sh
+echo "### UCI firewall"
 uci show firewall
 
-# iptables互換ルールを確認（実際に適用されているルール）
+echo "### zones and forwarding"
+uci show firewall | grep -E 'zone|forwarding|name|network|src|dest|target|input|output|forward'
+
+echo "### iptables rules"
+iptables-save 2>/dev/null | head -n 200 || true
+
+echo "### ip6tables rules"
+ip6tables-save 2>/dev/null | head -n 200 || true
+
+echo "### firewall logs"
+logread | grep -Ei 'firewall|drop|reject|guest|device|vpn' | tail -n 120
+```
+
+LN6001-JPでは、まずUCI設定と `iptables-save`、`ip6tables-save` の表示を見ます。
+
+古い記事では `iptables -L -n -v` を使う例もありますが、まずは `uci show firewall`、`iptables-save`、`ip6tables-save` を中心に見るほうが分かりやすいです。
+
+互換レイヤーや環境によって `iptables` が見える場合もあります。
+
+確認用として使う場合は、次のように失敗しても止まらない形にします。
+
+```sh
 iptables -L -n -v 2>/dev/null || true
-
-# nftables側で見える環境ではこちらも確認
-nft list ruleset 2>/dev/null | grep -E 'guest|lan|wan|reject|drop' | head -n 80
-
-# 特定ゾーンのforward chain確認
-iptables -L FORWARD -n -v 2>/dev/null || true
-
-# ファイアウォール関連のログ
-logread | grep -i 'DROP\|REJECT\|firewall' | tail -n 50
+iptables-save 2>/dev/null | head -n 120 || true
 ```
 
-最初は「REJECTやDROPが大量に出ていないか」を見るくらいでも十分役立ちます。
+## 実端末で確認する
 
-## ゾーン設定のよくある失敗
+firewallは、設定画面だけ見ても安心できません。
 
-firewall設定で困る時は、「止めすぎた」か「分離できていない」かのどちらかが多いです。
+実際の端末で確認します。
 
-最初は、Guest → LANが届かないことを確認できればかなり十分です。
+## Guest端末で確認する
 
-### 設定後にインターネットにつながらない
+Guest Wi-Fiに接続した端末から確認します。
 
-**確認:** lan→wan のForwardingが存在するか確認
+![表画像 table-17](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-17.png)
 
-```sh
-uci show firewall | grep forwarding
+## Device端末で確認する
+
+Deviceネットワークにつないだ機器で確認します。
+
+![表画像 table-18](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-18.png)
+
+## VPN端末で確認する
+
+VPN接続端末で確認します。
+
+![表画像 table-19](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/table-19.png)
+
+ここで大事なのは、つながる確認だけではありません。
+
+```txt
+届くべきところに届く
+届かないべきところに届かない
 ```
 
-`src='lan' dest='wan'` のエントリがなければ追加する:
+この両方を確認します。
+
+## よくある失敗と対処
+
+## Guest端末がIPアドレスを取れない
+
+よくある原因は、DHCPを許可していないことです。
+
+確認します。
 
 ```sh
+uci show dhcp.guest
+uci show firewall | grep -E 'guest|Allow-Guest-DHCP'
+logread | grep -i dnsmasq | tail -n 80
+cat /tmp/dhcp.leases
+```
+
+対処:
+
+- guest interfaceでDHCP Serverが有効か確認する
+- `Allow-Guest-DHCP` を作る
+- Source zoneが `guest` になっているか確認する
+- Source port `68`、Destination port `67` を確認する
+- 端末のWi-Fiを切断して再接続する
+
+## Guest端末はIPを取るがWebサイトが開けない
+
+DNSまたはguest → wan forwardingを確認します。
+
+```sh
+ifstatus guest
+ifstatus wan
+uci show firewall | grep -E 'guest|Allow-Guest-DNS|forwarding'
+logread | grep -Ei 'dnsmasq|firewall' | tail -n 100
+```
+
+判断の目安です。
+
+```txt
+8.8.8.8へping OK / example.com NG
+→ DNS問題
+
+8.8.8.8へping NG / example.com NG
+→ guest → wan forwardingやWAN側を確認
+```
+
+## GuestからLANへ届いてしまう
+
+これは分離としては失敗です。
+
+確認します。
+
+```sh
+uci show wireless | grep -E 'guest|ssid|network'
+uci show firewall | grep -E 'guest|lan|forwarding'
+```
+
+見るポイントです。
+
+- Guest用SSIDのNetworkが `lan` になっていないか
+- guest → lan forwardingを作っていないか
+- Traffic Ruleでguestからlanを許可していないか
+- guest zoneのForwardが `ACCEPT` になっていないか
+
+## GuestからLuCIが開けてしまう
+
+guest zoneのInputが広すぎる可能性があります。
+
+確認します。
+
+```sh
+uci show firewall | grep -A8 -E "name='guest'|name=\"guest\""
+uci show firewall | grep -E '80|443|22|guest'
+```
+
+対処:
+
+- guest zoneのInputを `REJECT` にする
+- DHCP / DNSだけTraffic Rulesで許可する
+- 80 / 443 / 22をguestから許可するルールがないか確認する
+
+## LAN端末がインターネットへ出られなくなった
+
+`lan → wan` forwardingが消えていないか確認します。
+
+```sh
+uci show firewall | grep -E 'forwarding|src|dest'
+ifstatus wan
+ip route show default
+```
+
+`lan → wan` がない場合は、LuCIでForwardingを戻すか、CLIで追加します。
+
+```sh
+cp /etc/config/firewall /etc/config/firewall.backup.before-restore-lan-wan.$(date +%Y%m%d-%H%M)
+
 uci add firewall forwarding
-uci set firewall.@forwarding[-1].src='lan'
-uci set firewall.@forwarding[-1].dest='wan'
+uci set firewall.@forwarding[-1].src="lan"
+uci set firewall.@forwarding[-1].dest="wan"
+
 uci changes firewall
 uci commit firewall
 /etc/init.d/firewall restart
 ```
 
-LAN→WAN forwarding が抜けると、LAN端末はインターネットへ出られなくなります。
+## LuCIへ入れなくなった
 
-最初は「lan → wan」が残っているかをまず確認すると切り分けしやすくなります。
+LAN側Inputを誤って `REJECT` にしたり、管理端末が別ネットワークへ移ったりした可能性があります。
 
-### LuCI管理画面にアクセスできなくなった
+まず、有線LANでLN6001-JPのLANポートへ直接つなぎます。
 
-- **原因:** LANゾーンのInputをREJECTに変更してしまった
-- **対処:** 有線LAN接続でSSHアクセスしてfirewallをリセット:
+それでも入れない場合、SSHで入れるならバックアップから戻します。
 
 ```sh
-cp /etc/config/firewall.backup.YYYYMMDD /etc/config/firewall
+cp /root/firewall-before-YYYYMMDD-HHMM/firewall /etc/config/firewall
 /etc/init.d/firewall restart
 ```
 
-最初は、有線LAN接続を1本残した状態で作業するほうが安全です。
+`YYYYMMDD-HHMM` は実際のバックアップフォルダ名に置き換えます。
 
-### Guestから社内LANにアクセスできてしまう
+LuCIバックアップを使う場合は、**System** → **Backup / Flash Firmware** から復元します。
 
-**確認:** guestゾーンのForwardがREJECTになっているか確認
+本当に戻れない場合は、リセットと復旧の記事を参照してください。
+
+ここで焦ってリセットボタンを押したくなります。
+
+分かります。
+
+でも、まだ有線LAN、管理IP、バックアップを確認する余地があります。
+
+## Device機器がクラウドへつながらない
+
+Device zoneからWANへ出る必要がある機器なのに、device → wan forwardingがない可能性があります。
+
+確認します。
 
 ```sh
-uci show firewall | grep -A 5 "name='guest'"
+ifstatus device
+uci show firewall | grep -E 'device|forwarding|Allow-Device'
+logread | grep -Ei 'dnsmasq|firewall|device' | tail -n 100
 ```
 
-ForwardがACCEPTになっていると、GuestからLANへそのまま届いてしまう場合があります。
+対処:
 
-### プリンターやNASにゲスト端末からアクセスできる
+- device → wan forwardingを許可するか検討する
+- Device用DNS許可を確認する
+- AdblockやDNS制御が強すぎないか確認する
+- 機器のクラウド接続要件を確認する
 
-Guestゾーンの転送ルールで lan への転送が REJECT になっていても、特定ポートへのアクセスを許可するルールが残っている可能性があります:
+カメラやスマート家電は、メーカーのクラウドへ出る必要があることがあります。
 
-```sh
-# ゲストから社内へのルールを確認
-iptables -L FORWARD -n -v | grep -i drop
+「DeviceはWAN禁止」と決め打ちせず、機器要件を見て決めます。
+
+## firewall変更の進め方
+
+firewallは、段階的に進めるのが安全です。
+
+おすすめの順番です。
+
+1. 現在のlan / wan設定を確認する
+2. LuCIバックアップを取る
+3. Guest networkとguest SSIDを作る
+4. guest zoneを作る
+5. DHCP / DNSを許可する
+6. guest → wanを許可する
+7. guest → lanが届かないことを確認する
+8. Device / IoTを追加する
+9. VPNのアクセス範囲を必要最小限にする
+10. 変更履歴を残す
+
+一気に完成形を作るより、1つ作って確認するほうがトラブル時に戻りやすくなります。
+
+OpenWrtでは、強い設定より、戻れる設定のほうが強いです。
+
+## 設定メモのテンプレート
+
+firewall設定を作ったら、次のようなメモを残しておくと便利です。
+
+```txt
+firewall zones:
+
+lan:
+  input: ACCEPT
+  output: ACCEPT
+  forward: ACCEPT
+  forwarding: lan -> wan
+
+guest:
+  input: REJECT
+  output: ACCEPT
+  forward: REJECT
+  forwarding: guest -> wan
+  rules:
+    Allow-Guest-DHCP
+    Allow-Guest-DNS
+  blocked:
+    guest -> lan
+    guest -> LuCI/SSH
+
+device:
+  input: REJECT
+  output: ACCEPT
+  forward: REJECT
+  forwarding:
+    device -> wan: allowed / disabled
+  rules:
+    Allow-Device-DHCP
+    Allow-Device-DNS
+    Allow-Staff-to-NVR-Web
+
+vpn:
+  purpose:
+    remote admin
+  allowed:
+    VPN -> NAS only
+    VPN -> LuCI only if needed
+
+backup:
+  backup-LN6001-before-firewall-zones-20260621.tar.gz
 ```
 
-Traffic Rulesで例外許可を作りすぎると、「なぜ通るのか」が分かりにくくなることがあります。
+半年後に見ると、firewall設定はかなり忘れます。
 
-## 段階的に進める推奨手順
-
-1. **まず**デフォルトの lan/wan ゾーン設定を確認して理解する
-2. Guest Wi-FiのSSIDを作り、guestゾーンを追加する（Article 007参照）
-3. 動作確認（Guest端末からLANへのpingが届かないことを確認）
-4. 問題なければ IoT・VPN など追加のゾーンを検討する
-
-一気に完成形を作るより、段階的に進めることで問題発生時の原因特定がかなり容易になります。
-
-特に家庭や小さなオフィスでは、「Guestだけ分ける」くらいから始めるほうが運用しやすくなります。
+「なぜこのルールを作ったか」を残しておくと、未来の自分が助かります。
 
 ## まとめ
 
-firewall zone の設定は、次の順番で進めると整理しやすいです:
+firewall zoneは、OpenWrt系ルーターでネットワークを分けるための中心です。
 
-1. 通信方針（どのゾーンからどこへの転送を許可/拒否するか）を先に決める
-2. **Network** → **Firewall** → **Zones** で新しいゾーンを追加する
-3. Forwarding でゾーン間の転送を設定する
-4. 必要に応じて Traffic Rules で細かいルールを追加する
-5. `iptables -L -n -v` でルールが正しく適用されているか確認する
+SSIDやVLANでネットワークを分けても、zoneとforwardingを設計しないと、通信方針は完成しません。
 
-最初から細かなTraffic Rulesを大量追加するより、「GuestからLANへ届かない」ことを先に確認するほうが重要です。
+最初に押さえるポイントは次の通りです。
 
-設定変更前のバックアップと、有線接続での作業が安全対策の基本です。
+1. zoneは通信ルールをまとめる部屋
+2. Inputは「そのzoneからルーター自身へ」
+3. Forwardは「そのzoneから別zoneへ」
+4. GuestやIoTのInputを `REJECT` にしたらDHCP / DNSを許可する
+5. Guest → WANは許可、Guest → LANは拒否
+6. IoT / Device → LANは原則拒否
+7. VPN → LANは必要な宛先だけ許可
+8. Traffic Rulesは例外に使う
+9. 設定前に必ずバックアップを取る
+10. 設定後は「届くべきところ」と「届かないべきところ」を両方確認する
 
-設定後は、次の3つが確認できれば十分です。最初はここまで確認できれば大きく外していません。
+最初から細かなルールを大量に作る必要はありません。
 
-- LAN からは必要な通信ができる
-- Guest や IoT から LAN へ不用意に届かない
-- 管理画面へ戻れなくなる変更をしていない
+まずはGuestからLANへ届かない。
+
+次にIoT / Deviceを分ける。
+
+最後にVPNのアクセス範囲を絞る。
+
+この順番で進めると、家庭・小さなオフィス・店舗でも壊しにくく運用できます。
 
 ![まず見るところ](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/016/diagram-03.png)
 
+## 次に読むなら
+
+firewall zoneの考え方が見えてきたら、次は目的に合わせて進みます。
+
+- [ゲストWi-Fiの作り方](https://note.com/ikmsan/n/nacbd5d573d67)
+- [VLANで社内・ゲストネットワークを分ける](https://note.com/ikmsan/n/n516c42447850)
+- [WireGuard/Tailscaleでリモート接続](https://note.com/ikmsan/n/n1a83908a226c)
+- [つながらない時の切り分け](https://note.com/ikmsan/n/n1ab2d47c6d10)
+- [設定バックアップと復元](https://note.com/ikmsan/n/n3c25190a8e94)
+
+GuestやIoTをまだ作っていない人は、ゲストWi-FiやVLANの記事へ。
+
+VPNからどこまで入れるかを整理したい人は、WireGuard / Tailscaleの記事へ進むと読みやすいです。
+
+## CLI例の前提
+
+この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。
+
+OpenWrt系のfirewall表示は、バージョンやターゲットによって変わります。LN6001-JPでは `iptables-save`、`ip6tables-save`、iptables互換表示を確認します。
+
+この記事では、まず `uci show firewall` で設定を確認し、必要に応じて `iptables-save` や `ip6tables-save` を読む方針にしています。
+
+LuCIの画面名、firewall設定項目、コマンド出力は、ファームウェア更新や追加モジュールで変わることがあります。
+
+記事の内容と実際の画面や出力が違う場合は、まずバックアップを取り、Linksys公式サポートやOpenWrtの最新ドキュメントも確認してください。
+
+無線の国設定、送信出力、DFS関連の値は変更しません。
+
 ## よくある質問
 
-### firewall zone は何のために使う？
+### firewall zoneは何のために使う？
 
-ネットワーク同士の通信をどこまで許可するかを整理するために使います。
+LAN、Guest、IoT、VPNなど、役割の違うネットワーク同士の通信ルールを分けるために使います。
 
-GuestやIoTをLANから分けたい時に特に重要です。
+たとえば、Guestからインターネットへは出すが、LAN内NASやプリンターへは入れない、といった制御ができます。
 
-### Guest と IoT は同じゾーンでもいい？
+### Input、Output、Forwardの違いは？
 
-用途が違うなら分けたほうが管理しやすいです。
+ルーター自身から見た向きです。
 
-来客端末とIoT機器では、許可したい通信が違うことが多いためです。
+Inputはzoneからルーター自身へ入る通信、Outputはルーター自身からzoneへ出る通信、Forwardはzoneから別zoneへ通過する通信です。
 
-### firewall 設定で一番気をつけることは？
+### Guest zoneのInputはREJECTでいい？
 
-管理画面へ戻れなくならないよう、有線接続で作業し、変更前にバックアップを取ってから進めることです。
+多くの場合、GuestではInputを `REJECT` にするのが分かりやすいです。
 
-特にLAN側Input設定を変更する時は注意します。
+ただし、そのままだとDHCPやDNSも拒否されるため、`Allow-Guest-DHCP` と `Allow-Guest-DNS` を追加します。
+
+### GuestからLANへ届かないようにするには？
+
+guest → lan のforwardingを作らないこと、guest zoneのForwardを `REJECT` にすること、Guest用SSIDが `guest` networkに紐づいていることを確認します。
+
+実端末から `192.168.1.1` やNASへ届かないことも確認してください。
+
+### IoTとGuestは同じzoneでいい？
+
+分けたほうが管理しやすいです。
+
+Guestは一時利用端末向け、IoTはスマート家電やカメラ向けで、必要な通信が違います。
+
+特に、Staffからカメラや録画機へ管理アクセスしたい場合は、Device zoneとして分けると整理しやすいです。
+
+### VPNはlan zoneに入れていい？
+
+自分だけが使う小さな環境では動きますが、アクセス範囲が広くなりやすいです。
+
+VPN専用zoneを作り、NASだけ、LuCIだけ、Staff LANだけのように必要な範囲へ絞る設計も検討してください。
+
+### firewall確認は何を見ればいい？
+
+LN6001-JPでは、`iptables-save` と `ip6tables-save` を見るほうが実機に合わせやすいです。
+
+まず `uci show firewall` で設定を確認し、必要に応じて `iptables-save` や `ip6tables-save` を使います。
+
+古い記事の `iptables -L -n -v` は、互換表示として見える場合もありますが、それだけに依存しないほうが安全です。
 
 ## 参考リンク
 
 - Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/
+- OpenWrt ルーターの複数SSIDセグメント分けをする方法 Velop WRT Pro 7: https://support.linksys.com/kb/article/7046-jp/
+- OpenWrt Wiki - Firewall configuration: https://openwrt.org/docs/guide-user/firewall/firewall_configuration
+- OpenWrt Wiki - Firewall overview: https://openwrt.org/docs/guide-user/firewall/overview
+- OpenWrt Wiki - Guest Wi-Fi basics: https://openwrt.org/docs/guide-user/network/wifi/guestwifi/guest-wlan
+- OpenWrt Wiki - Guest Wi-Fi using LuCI: https://openwrt.org/docs/guide-user/network/wifi/guestwifi/configuration_webinterface
 
 ## この連載で使っているOpenWrtルーター
 

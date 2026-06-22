@@ -1,65 +1,178 @@
 <!-- mirror-source: articles/007-guest-wifi.md -->
 
-# ゲストWi‑Fiの作り方: 家庭内LANと来客端末を分ける【OpenWrt集中連載007】
+# ゲストWi-FiはSSIDだけでは完成しない｜LN6001-JPで家庭内LANからちゃんと分ける【OpenWrt集中連載007】
 
-OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
+ゲストWi-Fiって、作るだけなら簡単そうに見えます。
 
-この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。
+`MyHome_Guest` みたいなSSIDを追加する。  
+パスワードを設定する。  
+ゲストにそれを教える。
 
-LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。
+はい、完成。
 
-このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。
+……と言いたくなるのですが、ここに少し罠があります。
 
-## 要約
+OpenWrt系ルーターでは、**SSIDを分けただけでは、ネットワークまで分かれているとは限りません**。
 
-ゲストWi‑Fiは、来客にインターネット接続を提供しつつ、家庭内LANや業務端末には触れさせないための基本機能です。
+たとえば、`MyHome_Guest` というSSIDを作っても、そのSSIDがメインの `lan` に紐づいていたら、中身は家族用Wi-Fiと同じ場所にいます。
 
-ただ、SSIDを分けるだけでは十分ではありません。同じLANネットワークにつながったままだと、来客端末からNAS、プリンター、ルーター管理画面などが見えてしまうことがあります。
+つまり、見た目はゲストWi-Fi。  
+でも、ゲスト端末からNASやプリンター、管理画面が見えてしまう可能性があります。
 
-LN6001-JPはOpenWrtベースなので、SSIDだけでなく、ネットワーク（IPアドレス範囲）や firewall zone まで含めて整理できます。
+これはちょっと嫌ですよね。
 
-最初は難しく見えるかもしれませんが、やること自体はシンプルです。
+ゲストWi-Fiで大事なのは、SSID名ではありません。
 
-- Guest用SSIDを作る
-- Guest専用ネットワークを作る
-- GuestからLANへ入れないようにする
+```txt
+ゲスト端末を家庭内LANや業務LANから分けること
+```
 
-この記事では、この3つをLuCIで順番に設定していきます。
+です。
+
+この記事では、Linksys Velop WRT Pro 7（LN6001-JP）で、ゲストWi-Fiを **SSID / network / DHCP / firewall zone** まで含めて作る流れをまとめます。
+
+> この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使いながら、家庭・小さなオフィス・店舗でOpenWrtベースルーターを現実的に使う方法をまとめています。  
+> 連載目次: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](https://note.com/ikmsan/n/ndf7569fea475)
+
+## 今日のゴール
+
+この記事のゴールは、ただゲスト用SSIDを追加することではありません。
+
+ここまでできればOKです。
+
+- ゲストWi-Fi用のSSIDを作る
+- ゲスト用networkを作る
+- ゲスト端末へIPアドレスを配れるようにする
+- ゲスト用firewall zoneを作る
+- ゲスト端末からインターネットへは出られる
+- ゲスト端末からLAN、NAS、LuCI、SSHへは入れない
+- 設定後に実端末で確認できる
+
+ざっくり言うと、
+
+```txt
+ゲストにはインターネットだけ使ってもらう
+家の中や店の裏側は見せない
+```
+
+という構成を作ります。
 
 ![よくある悩み](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/diagram-01.png)
 
-## この記事でわかること
+## 先にざっくり結論
 
-- ゲストWi‑FiでSSIDを分けるだけでは足りない理由
-- Guest用ネットワークと firewall zone の作り方
-- 来客端末をLANへ入れないための確認ポイント
-- 家庭・店舗でGuest Wi‑Fiをどう分けると運用しやすいか
+ゲストWi-Fiは、次の4点セットで作ります。
 
-## こんな人に向いています
+```txt
+SSID
+network
+DHCP
+firewall zone
+```
 
-- 家庭で来客用Wi-Fiを安全に分けたい
-- 店舗や事務所で、お客様用Wi-Fiと業務用ネットワークを分けたい
-- SSIDを分けただけで十分か不安がある
+SSIDだけ作っても、まだ半分です。
+
+おすすめの基本構成はこうです。
+
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-01.png)
+
+ここで大事なのは、ゲスト端末がIPを取るにはDHCPが必要で、ドメイン名を解決するにはDNSが必要ということです。
+
+guest zoneのInputを `REJECT` にする場合、DHCPとDNSだけは明示的に許可します。
+
+```txt
+Allow-Guest-DHCP
+Allow-Guest-DNS
+```
+
+この2つを忘れると、ゲスト端末がWi-Fiにはつながるのに、IPが取れない、名前解決できない、という状態になりがちです。
+
+## こういう人向けです
+
+この記事は、次のような人向けです。
+
+- 家族以外の人にWi-Fiを使わせたい
+- 店舗や小さなオフィスでゲストWi-Fiを出したい
+- ゲスト端末からNASやプリンターを見せたくない
+- ゲストWi-FiをSSIDだけで作ってよいのか不安
+- OpenWrtのguest network / firewall zoneの考え方を知りたい
+- LuCIでゲストWi-Fiを作りたい
+- 設定後に何を確認すべきか知りたい
+
+逆に、単に「家族用SSIDをもう1つ増やしたい」だけなら、ここまで分けなくてもよい場合があります。
+
+でも、**ゲストWi-Fi** と呼ぶなら、LANから分けるところまでやっておくのがおすすめです。
 
 ![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/diagram-02.png)
 
-## まずはここまでで十分
+## 最初に言葉だけそろえる
 
-最初から細かなルールを増やしすぎなくても大丈夫です。むしろ、最初はシンプルな分離だけのほうがトラブルも少なくなります。
+ゲストWi-Fi設定で出てくる言葉を、軽く整理しておきます。
 
-まずは次の3つができれば、ゲストWi‑Fiとしては十分に役立ちます。
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-02.png)
 
-1. Guest用の独立したネットワークを作る
-2. Guest用SSIDをそのネットワークへ紐付ける
-3. GuestからLANへ入れないよう firewall zone を分ける
+ここで一番大事なのは、SSIDとnetworkは別物ということです。
 
-まずは「インターネットには出られるが、自宅や業務の機器は見えない」状態を作ることが優先です。
+```txt
+SSID = 見た目のWi-Fi名
+network = 中身の所属先
+```
 
-Guest Wi‑Fiは、“便利な来客用回線” というより、“家庭や業務ネットワークを混ぜないための入口” と考えると整理しやすくなります。
+`MyHome_Guest` というSSID名でも、networkが `lan` なら、ゲスト端末はメインLANにいます。
 
-## 設定前に現在の状態を控える
+ここを間違えると、見た目だけゲストWi-Fiになります。
 
-Guest Wi-Fi設定では、`network`、`wireless`、`firewall`、`dhcp` をまとめて触ります。変更前に現在の状態を保存しておくと、設定を戻したい時にかなり安心です。
+## ゲストWi-Fiの完成形
+
+この記事では、次の構成を作ります。
+
+```txt
+インターネット
+    │
+LN6001-JP
+    │
+    ├── lan: 192.168.1.0/24
+    │     SSID: MyHome
+    │     用途: 家族PC、スマホ、NAS、プリンター
+    │
+    └── guest: 192.168.2.0/24
+          SSID: MyHome_Guest
+          用途: ゲスト端末
+          方針: インターネットだけ
+```
+
+通信方針はこうです。
+
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-03.png)
+
+ゲスト端末はインターネットには出られる。
+
+でも、家庭内LANや業務LANには入れない。
+
+これがゲストWi-Fiの基本です。
+
+## 設定前にバックアップを取る
+
+ゲストWi-Fiでは、`network`、`wireless`、`dhcp`、`firewall` を触ります。
+
+つまり、Wi-Fiとネットワークとfirewallを同時に触ります。
+
+ここでバックアップなしは、ちょっと怖いです。
+
+まずLuCIでバックアップを取ります。
+
+1. **System** → **Backup / Flash Firmware** を開く
+2. **Generate archive** をクリックする
+3. `.tar.gz` ファイルをPCへ保存する
+4. ファイル名に日付と状態を入れる
+
+例:
+
+```txt
+backup-LN6001-before-guest-wifi-20260621.tar.gz
+```
+
+SSHでも状態メモを残すなら、次を実行します。
 
 ```sh
 BACKUP_DIR="/root/guest-before-$(date +%Y%m%d-%H%M)"
@@ -70,331 +183,708 @@ for cfg in network wireless firewall dhcp; do
   uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
 done
 
-ifstatus lan > "$BACKUP_DIR/ifstatus-lan.json" 2>/dev/null || true
 ifstatus wan > "$BACKUP_DIR/ifstatus-wan.json" 2>/dev/null || true
-wifi status > "$BACKUP_DIR/wifi-status.json"
-cat /tmp/dhcp.leases > "$BACKUP_DIR/dhcp-leases.txt"
+ifstatus wan6 > "$BACKUP_DIR/ifstatus-wan6.json" 2>/dev/null || true
+wifi status > "$BACKUP_DIR/wifi-status.json" 2>/dev/null || true
+cat /tmp/dhcp.leases > "$BACKUP_DIR/dhcp-leases.txt" 2>/dev/null || true
+logread | tail -n 200 > "$BACKUP_DIR/logread-tail.txt"
 
 ls -l "$BACKUP_DIR"
 ```
 
-バックアップにはSSIDやWi-Fi関連の情報が含まれるため、そのまま公開場所へ貼り付けないようにします。
+このバックアップにはSSID、Wi-Fiパスワード、内部IP、端末名などが含まれることがあります。
 
-## なぜSSIDを分けるだけでは足りないか
+そのままSNSや公開リポジトリへ出さないようにしてください。
 
-SSIDが違っていても、同じLANネットワークにつながっていれば、来客端末から家庭内のNAS、プリンター、管理画面が見えてしまうことがあります。
+## 作業は有線LANからがおすすめ
 
-「Wi‑Fi名が違う = 完全に分離されている」ではないところが、最初に少し分かりにくいポイントです。
+ゲストWi-Fiの設定中は、Wi-Fiが一時的に切れることがあります。
 
-![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-01.png)
+できれば、有線LANで接続したPCから作業してください。
 
-つまり、Guest Wi‑Fiは「SSIDだけ」ではなく、「IPアドレス範囲」と「通信ルール」まで分けて初めて意味が出てきます。
+```txt
+PC
+  ↓ 有線LAN
+LN6001-JP LANポート
+```
 
-OpenWrt系では、Guest Wi‑Fiを作る時に「SSID」「ネットワーク」「firewall zone」を別々に設定します。
+スマートフォンだけで作業していると、SSIDを変更した瞬間に接続が切れて、
 
-最初は少し複雑に見えますが、役割を分けているぶん、あとから整理しやすいのが特徴です。
+```txt
+今、何が反映されたの？
+どのSSIDにつなぎ直せばいいの？
+```
 
-### ステップ1: Guestネットワーク（インターフェース）を作る
+となりがちです。
+
+有線LANでLuCIへ入れる状態を残しておくと安心です。
+
+## ステップ1: ゲスト用bridge deviceを作る
+
+まず、ゲスト用の器を作ります。
+
+LuCIで作業します。
 
 1. **Network** → **Interfaces** を開く
-2. **Add new interface** をクリック
-3. 以下を設定:
-
-![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-02.png)
-
-4. **Create interface** をクリック
-5. **General Settings** タブ:
-   - IPv4 address: `192.168.2.1`
-   - IPv4 netmask: `255.255.255.0`
-6. **DHCP Server** タブ → **Setup DHCP Server** をクリック:
-   - Start: `100`
-   - Limit: `50`
-   - Leasetime: `1h`
-7. **Save** をクリック
-
-ここで作っているのは、Guest端末専用のIPアドレス空間です。
-
-家庭LANとは別の `192.168.2.x` を使うことで、あとから firewall で分離しやすくなります。
-
-### ステップ2: Guest用SSIDを作る
-
-1. **Network** → **Wireless** を開く
-2. 任意の帯域（例: 5GHz `wifi1`）の **Add** をクリック
-3. **Interface Configuration** タブ:
-
-![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-03.png)
-
-4. **Wireless Security** タブ:
+2. **Devices** タブを開く
+3. **Add device configuration** をクリックする
+4. 次のように設定する
 
 ![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-04.png)
 
-5. **Save** をクリック
+5. **Save** をクリックする
 
-Guest用SSIDは、家族用SSIDと完全に同じにしないほうが分かりやすいです。
+Wi-FiだけのゲストWi-Fiなら、Bridge portsは空のままで進めます。
 
-「Guest」「MyHome_Guest」のように、来客側でも見分けやすい名前にしておくと運用しやすくなります。
+有線ポートもゲスト用に分けたい場合は、VLAN設計が必要になります。
 
-### ステップ3: firewall zoneを設定する
+ここでは、まずWi-Fiだけのゲストネットワークを作ります。
 
-ここがGuest Wi‑Fiの“分離”を実際に行う部分です。
+## ステップ2: guest interfaceを作る
 
-SSIDだけ分けても、firewall zone を分けなければLANへ到達できてしまうことがあります。
+次に、ゲスト用networkを作ります。
 
-1. **Network** → **Firewall** を開く
-2. **Zones** タブで **Add** をクリック
-3. **General Settings** タブ:
+1. **Network** → **Interfaces** を開く
+2. **Interfaces** タブで **Add new interface** をクリックする
+3. 次のように設定する
 
 ![表画像 table-05](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-05.png)
 
-4. **Inter-Zone Forwarding** セクション:
-   - **Allow forward to destination zones**: `wan` にチェック
-   - **Allow forward from source zones**: （空白のまま）
-
-5. **Save & Apply** をクリック
-
-この設定では、「Guest → インターネット」は許可し、「Guest → LAN」は許可しない構成になります。
-
-### ステップ4: GuestからLANへのアクセスを確実に遮断する
-
-デフォルトのfirewall設定では通常GuestゾーンからLANへの転送は拒否されますが、明示的なルールを追加しておくと、あとから設定を見返した時にも分かりやすくなります。
-
-1. **Network** → **Firewall** → **Traffic Rules** タブを開く
-2. **Add** をクリック
-3. 以下を設定:
+4. **Create interface** をクリックする
+5. **General Settings** で次を設定する
 
 ![表画像 table-06](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-06.png)
 
-4. **Save & Apply**
+6. **Save** をクリックする
 
-### ステップ5: GuestからルーターのLuCIへのアクセスを遮断する
+これで、ゲストネットワークの入口ができます。
 
-Guest端末がルーターの管理画面（192.168.1.1）にアクセスできないようにします。
+メインLANが `192.168.1.0/24` の場合、ゲストは `192.168.2.0/24` に分けると分かりやすいです。
 
-家庭用途でも、ここを分けておくと「来客に管理画面を見せない」状態を作りやすくなります。
+## ステップ3: guest DHCPを有効にする
 
-1. **Network** → **Firewall** → **Traffic Rules** タブを開く
-2. **Add** をクリック
-3. 以下を設定:
+ゲスト端末にIPアドレスを配るため、DHCPを有効にします。
+
+1. **Network** → **Interfaces** を開く
+2. `guest` interfaceの **Edit** をクリックする
+3. **DHCP Server** タブを開く
+4. DHCP Serverが未設定なら **Setup DHCP Server** をクリックする
+5. 次のように設定する
 
 ![表画像 table-07](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-07.png)
 
-4. **Save & Apply**
+6. **Save** をクリックする
 
-## 設定後の確認方法
+この設定だと、ゲスト端末には次のようなIPが配られます。
 
-設定が終わったら、必ず実際の端末で確認します。
+```txt
+192.168.2.100 - 192.168.2.199
+```
 
-「設定を入れた」だけで終わらず、「本当に分離できているか」を確認するところまでがGuest Wi‑Fi設定です。
+ゲストWi-Fiでは、リース時間を短めにしておくと扱いやすいです。
 
-以下を必ず確認します:
+家庭なら `12h` でも構いません。
 
-**1. Guest端末からインターネットにつながるか**
-- Guest SSIDに接続して、ブラウザで任意のWebサイトを開く
+店舗や一時利用のゲストが多い環境では `2h` くらいでもよいと思います。
 
-**2. Guest端末からLAN内の機器が見えないか**
-- Guest SSIDに接続した状態で、`192.168.1.1`（ルーター）にアクセスしてみる → 接続できないことを確認
-- NASやプリンターのIPアドレスへアクセスしてみる → 接続できないことを確認
+## ステップ4: ゲストSSIDを作る
 
-**3. Guest端末がDHCPでIPアドレスを取得できているか**
-- Guest端末のWi-Fi設定で、IPアドレスが `192.168.2.x` になっていることを確認
+次に、実際に端末から見えるゲストWi-Fi名を作ります。
 
-## CLIで状態を確認する
+1. **Network** → **Wireless** を開く
+2. ゲストWi-Fiを出したいradioの **Add** をクリックする
+   - 5GHzに出すなら `wifi1`
+   - 2.4GHzに出すなら `wifi0`
+3. 次のように設定する
+
+![表画像 table-08](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-08.png)
+
+4. **Wireless Security** を開く
+5. 暗号化方式とKeyを設定する
+6. **Save** をクリックする
+
+ここで大事なのは、Networkを必ず `guest` にすることです。
+
+`lan` にすると、見た目はゲストWi-Fiでも、中身はMain LANになります。
+
+ゲストWi-Fiを作る時にいちばん多い失敗がこれです。
+
+```txt
+SSIDはGuest
+でもNetworkはlan
+```
+
+これは、名前だけゲストWi-Fiです。
+
+## ゲストWi-Fiを2.4GHzに出すか、5GHzに出すか
+
+家庭や小さなオフィスでは、まず5GHzで出すのが扱いやすいです。
+
+スマートフォンやPCのゲスト利用が中心なら、5GHzで十分です。
+
+![表画像 table-09](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-09.png)
+
+店舗で広くゲストWi-Fiを出したい場合、2.4GHzも検討できます。
+
+ただし、2.4GHzは混雑しやすいので、速度重視のゲスト利用には向きません。
+
+最初は5GHzで作り、必要に応じて2.4GHz側にも追加するくらいで大丈夫です。
+
+## ステップ5: guest firewall zoneを作る
+
+ここからが本番です。
+
+ゲストWi-Fiを本体LANから分けるには、firewall zoneを作ります。
+
+1. **Network** → **Firewall** を開く
+2. **Zones** タブを開く
+3. **Add** をクリックする
+4. 次のように設定する
+
+![表画像 table-10](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-10.png)
+
+5. **Inter-Zone Forwarding** で次を設定する
+
+![表画像 table-11](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-11.png)
+
+6. **Save** をクリックする
+
+ここでやっていることは、ざっくり言うとこうです。
+
+```txt
+guestからインターネットへは出ていい
+guestからLANへは行かせない
+guestからルーター自身へも基本は入れない
+```
+
+ゲストWi-Fiは、これでかなり“ゲストらしく”なります。
+
+## ステップ6: DHCPとDNSだけ許可する
+
+guest zoneのInputを `REJECT` にすると、ゲスト端末からルーター自身への通信は基本的に拒否されます。
+
+これは安全側の設定です。
+
+ただし、このままだと困ることがあります。
+
+ゲスト端末は、ルーターに対してDHCPとDNSを使う必要があります。
+
+つまり、これだけは許可します。
+
+```txt
+DHCP = IPアドレスをもらうため
+DNS = google.com などの名前を解決するため
+```
+
+この2つを許可しないと、
+
+```txt
+Wi-FiにはつながるけどIPが取れない
+IPはあるけどWebサイト名が引けない
+```
+
+という状態になります。
+
+## DHCPを許可する
+
+**Network** → **Firewall** → **Traffic Rules** でルールを追加します。
+
+![表画像 table-12](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-12.png)
+
+DHCPは、ゲスト端末がIPアドレスをもらうために必要です。
+
+## DNSを許可する
+
+同じくTraffic Rulesで追加します。
+
+![表画像 table-13](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-13.png)
+
+DNSは、ゲスト端末がドメイン名を解決するために必要です。
+
+この2つは、ゲストWi-Fiの定番ハマりポイントです。
+
+ゲストWi-FiでIPが取れない、名前解決できない時は、まずこの2つを見ます。
+
+## ステップ7: Save & Applyする
+
+すべて設定したら、LuCI上部の保留中の変更を確認し、**Save & Apply** をクリックします。
+
+反映中にWi-Fiが一時的に切れることがあります。
+
+有線LANで作業していれば、そのままLuCIに戻りやすいです。
+
+反映後、ゲスト端末を `MyHome_Guest` へ接続します。
+
+ここからが確認です。
+
+## 設定後に必ず確認すること
+
+ゲストWi-Fiは、作っただけでは終わりではありません。
+
+必ず実端末で確認します。
+
+確認するのは、次の2つです。
+
+```txt
+つながるべきところにつながる
+つながってはいけないところにつながらない
+```
+
+## ゲスト端末で確認する
+
+スマートフォンやPCをゲストWi-Fiへ接続します。
+
+確認項目は次です。
+
+![表画像 table-14](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-14.png)
+
+インターネットへ出られるだけでは不十分です。
+
+ゲスト端末からLANへ届かないことまで確認します。
+
+## CLIで確認する
+
+SSHでLN6001-JPへ入り、状態を確認します。
 
 ```sh
-echo "### Guest DHCP leases"
+echo "### guest interface"
+ifstatus guest 2>/dev/null || true
+
+echo "### guest DHCP"
+uci show dhcp.guest 2>/dev/null || true
+
+echo "### guest firewall"
+uci show firewall | grep -E 'guest|Allow-Guest|forwarding'
+
+echo "### wireless guest mapping"
+uci show wireless | grep -E 'guest|MyHome_Guest|ssid|network'
+
+echo "### active DHCP leases"
 cat /tmp/dhcp.leases
 
-echo "### Guest network config"
-uci show network.guest
-
-echo "### Guest DHCP config"
-uci show dhcp.guest
-
-echo "### Guest firewall hints"
-uci show firewall | grep -E "guest|Allow-Guest|Block Guest"
-
-echo "### Guest interface addresses"
-ip addr show | grep -A4 -E 'br-guest|guest'
-
-echo "### dnsmasq logs"
-logread | grep -i dnsmasq | grep guest | tail -n 30
+echo "### recent logs"
+logread | grep -Ei 'guest|dnsmasq|firewall|reject|drop' | tail -n 100
 ```
 
-`uci show network.guest` と `uci show firewall` は、Guestネットワークがどこへ紐付いているかを確認する時に便利です。
+見るポイントです。
 
-最初はCLIで変更するより、「今どう設定されているか」を見る用途で使うくらいで十分です。
+- `guest` interfaceがあるか
+- `guest` DHCPが有効か
+- `Allow-Guest-DHCP` があるか
+- `Allow-Guest-DNS` があるか
+- `guest → wan` forwardingがあるか
+- `guest → lan` forwardingを作っていないか
+- ゲスト端末が `192.168.2.x` を取っているか
 
-## 設定変更前のバックアップ
+## UCIで作る場合の例
 
-```sh
-BACKUP_DIR="/root/guest-before-change-$(date +%Y%m%d-%H%M)"
-mkdir -p "$BACKUP_DIR"
+最初はLuCIで作るほうが安全です。
 
-for cfg in network wireless firewall dhcp; do
-  cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
-  uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
-done
+ただ、設定内容をテキストで理解したい人向けに、UCI例も載せておきます。
 
-ls -l "$BACKUP_DIR"
-```
-
-Guest Wi‑Fi設定は、network / wireless / firewall の3つへ同時に変更が入ります。変更前バックアップを残しておくと、設定を戻したい時にかなり安心です。
-
-## よくある失敗と対処
-
-その前に、次の3つが確認できれば大枠では成功しています。最初はここまで確認できれば十分です。
-
-- Guest 端末が `192.168.2.x` のIPアドレスを取得している
-- Guest 端末からインターネットへ出られる
-- Guest 端末から NAS、プリンター、管理画面へ直接届かない
-
-### Guest端末がIPアドレスを取得できない
-
-**原因:** DHCPサーバーがGuestインターフェースで動いていない
-**対処:** `Network > Interfaces > guest > Edit > DHCP Server` タブで「Setup DHCP Server」をクリックし、DHCPを有効化する
-
-### Guestからインターネットへ出られない
-
-**原因:** firewall zoneの設定でWANへの転送が許可されていない
-**対処:** `Network > Firewall > Zones` でguestゾーンの「Allow forward to destination zones」に `wan` が含まれているか確認する
-
-### Guestから管理画面にアクセスできてしまう
-
-**原因:** firewall ruleの設定が不足している
-**対処:** 上記ステップ5の「Block Guest to Router Admin」ルールを追加する
-
-### 変更後にLANからLuCIにアクセスできなくなった
-
-firewall設定を触ると、意図せず自分自身の管理アクセスまで止めてしまうことがあります。
-
-最初は有線LANを1本つないだ状態で作業すると、復旧しやすくなります。
-
-1. 有線でLANポートに接続する
-2. バックアップから設定を復元する: `cp /etc/config/firewall.backup.YYYYMMDD /etc/config/firewall && /etc/init.d/firewall restart`
-
-## UCIで設定する方法（上級者向け）
-
-Guest Wi‑FiはCLIでも設定できますが、最初はLuCIから作るほうが安全です。
-
-UCIで設定する場合も、まず `uci show network` や `uci show firewall` で現在設定を確認してから変更することをおすすめします。
+SSIDの作成はradio名を確認してから行う必要があるため、ここでは主にnetwork、DHCP、firewallの例です。
 
 ```sh
-BACKUP_DIR="/root/guest-uci-before-$(date +%Y%m%d-%H%M)"
+BACKUP_DIR="/root/guest-before-uci-$(date +%Y%m%d-%H%M)"
 mkdir -p "$BACKUP_DIR"
+
 for cfg in network dhcp firewall wireless; do
   cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
   uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
 done
 
-# Guestネットワーク追加
-uci set network.guest=interface
-uci set network.guest.proto='static'
-uci set network.guest.ipaddr='192.168.2.1'
-uci set network.guest.netmask='255.255.255.0'
+# guest bridge
+uci -q delete network.guest_dev
+uci set network.guest_dev="device"
+uci set network.guest_dev.type="bridge"
+uci set network.guest_dev.name="br-guest"
+
+# guest interface
+uci -q delete network.guest
+uci set network.guest="interface"
+uci set network.guest.proto="static"
+uci set network.guest.device="br-guest"
+uci set network.guest.ifname="br-guest"
+uci set network.guest.ipaddr="192.168.2.1"
+uci set network.guest.netmask="255.255.255.0"
+
+# guest DHCP
+uci -q delete dhcp.guest
+uci set dhcp.guest="dhcp"
+uci set dhcp.guest.interface="guest"
+uci set dhcp.guest.start="100"
+uci set dhcp.guest.limit="100"
+uci set dhcp.guest.leasetime="2h"
+
+# guest firewall zone
+uci -q delete firewall.guest
+uci set firewall.guest="zone"
+uci set firewall.guest.name="guest"
+uci set firewall.guest.network="guest"
+uci set firewall.guest.input="REJECT"
+uci set firewall.guest.output="ACCEPT"
+uci set firewall.guest.forward="REJECT"
+
+# guest -> wan
+uci -q delete firewall.guest_wan
+uci set firewall.guest_wan="forwarding"
+uci set firewall.guest_wan.src="guest"
+uci set firewall.guest_wan.dest="wan"
+
+# DHCP allow
+uci -q delete firewall.guest_dhcp
+uci set firewall.guest_dhcp="rule"
+uci set firewall.guest_dhcp.name="Allow-Guest-DHCP"
+uci set firewall.guest_dhcp.src="guest"
+uci set firewall.guest_dhcp.proto="udp"
+uci set firewall.guest_dhcp.src_port="68"
+uci set firewall.guest_dhcp.dest_port="67"
+uci set firewall.guest_dhcp.family="ipv4"
+uci set firewall.guest_dhcp.target="ACCEPT"
+
+# DNS allow
+uci -q delete firewall.guest_dns
+uci set firewall.guest_dns="rule"
+uci set firewall.guest_dns.name="Allow-Guest-DNS"
+uci set firewall.guest_dns.src="guest"
+uci set firewall.guest_dns.proto="tcp udp"
+uci set firewall.guest_dns.dest_port="53"
+uci set firewall.guest_dns.target="ACCEPT"
+
 uci changes network
-uci commit network
-
-# DHCPサーバー追加
-uci set dhcp.guest=dhcp
-uci set dhcp.guest.interface='guest'
-uci set dhcp.guest.start='100'
-uci set dhcp.guest.limit='50'
-uci set dhcp.guest.leasetime='1h'
 uci changes dhcp
-uci commit dhcp
-
-# firewall zone追加
-uci add firewall zone
-uci set firewall.@zone[-1].name='guest'
-uci set firewall.@zone[-1].input='REJECT'
-uci set firewall.@zone[-1].output='ACCEPT'
-uci set firewall.@zone[-1].forward='REJECT'
-uci add_list firewall.@zone[-1].network='guest'
-
-# GuestからWANへの転送を許可
-uci add firewall forwarding
-uci set firewall.@forwarding[-1].src='guest'
-uci set firewall.@forwarding[-1].dest='wan'
-
-# Guest端末がIPアドレスを取得できるようDHCPを許可
-uci add firewall rule
-uci set firewall.@rule[-1].name='Allow-Guest-DHCP'
-uci set firewall.@rule[-1].src='guest'
-uci set firewall.@rule[-1].proto='udp'
-uci set firewall.@rule[-1].dest_port='67-68'
-uci set firewall.@rule[-1].target='ACCEPT'
-
-# Guest端末がルーターのDNSを使えるようDNSを許可
-uci add firewall rule
-uci set firewall.@rule[-1].name='Allow-Guest-DNS'
-uci set firewall.@rule[-1].src='guest'
-uci set firewall.@rule[-1].proto='tcpudp'
-uci set firewall.@rule[-1].dest_port='53'
-uci set firewall.@rule[-1].target='ACCEPT'
-
 uci changes firewall
+
+uci commit network
+uci commit dhcp
 uci commit firewall
 
-# サービスを再起動
 /etc/init.d/network restart
 /etc/init.d/dnsmasq restart
 /etc/init.d/firewall restart
 ```
 
-反映後はGuest端末を接続し、`cat /tmp/dhcp.leases`、`uci show firewall | grep guest`、Guest端末からのWeb閲覧、Guest端末から `https://192.168.1.1` へ届かないことを確認します。
+SSIDの追加は、LuCIの **Network → Wireless** から行うほうが確認しやすいです。
 
-## 家庭と店舗での使い分け
+CLIでSSIDも作る場合は、必ず先にradio名を確認します。
 
-Guest Wi‑Fiは、家庭でも店舗でも「端末を混ぜない」ためにかなり役立ちます。
+```sh
+uci show wireless | grep '=wifi-device'
+uci show wireless | grep -E 'device|ssid|network'
+```
 
-特に最近は、スマートフォン、IoT、ゲーム機、防犯カメラなど、接続機器が増えているため、最初から分けておくほうが管理しやすくなります。
+確認せずに無線設定をコピペ実行しないでください。
 
-**家庭:**
-- 友人・親戚の来客用
-- 子どもの友人のゲーム機・スマートフォン
-- 一時的な作業業者へのWi-Fi提供
-- パスワードを定期的に変えて渡す運用が向く
+## IPv6の扱い
 
-**店舗:**
-- 来客へのフリーWi-Fi提供
-- スタッフ用SSIDとは必ず分ける
-- POSや決済端末は別ネットワークに置く
-- 業務PCや防犯カメラへのアクセスを遮断する
+この記事では、まずIPv4のゲストWi-Fiを作ります。
+
+IPv6をゲストWi-Fiへ配るかどうかは、別途考えます。
+
+IPoE環境では、IPv6が絡むと少し見え方が変わります。
+
+ゲストWi-FiでもIPv6を使わせたい場合は、次の点を確認します。
+
+- guestにIPv6 prefixを配るか
+- guest → lanがIPv6でも拒否されているか
+- DNSがIPv4 / IPv6の両方で意図通りか
+- Family DNSやAdblockの抜け道になっていないか
+
+最初は、IPv4のゲストWi-Fi分離を安定させてから、IPv6を扱うのがおすすめです。
+
+IPv6まわりは、IPv6の落とし穴の記事で詳しく扱います。
+
+## ゲストWi-FiでAdblockやFamily DNSを使う場合
+
+ゲストWi-FiにもAdblockやFamily DNSを適用したくなるかもしれません。
+
+これはできます。
+
+ただし、最初から強くかけすぎると、ゲスト端末の一部サービスが動かないことがあります。
+
+家庭なら、ゲストWi-Fiは通常DNSでも十分な場合があります。
+
+店舗なら、ゲストWi-Fiへ軽めのDNS制御を入れるのも選択肢です。
+
+ただし、ゲストWi-Fiで大事なのはまず分離です。
+
+```txt
+GuestからLANへ入れない
+```
+
+これが最優先です。
+
+DNS制御はその次で大丈夫です。
+
+## ゲストWi-Fiのパスワード運用
+
+ゲストWi-Fiのパスワードは、メインSSIDと同じにしないほうがよいです。
+
+家庭なら、家族用とは別のパスワードにします。
+
+店舗なら、ゲスト用パスワードを掲示する場合もあります。
+
+その場合、Staff用SSIDとは必ず別にします。
+
+おすすめの考え方です。
+
+![表画像 table-15](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/table-15.png)
+
+ゲストWi-Fiのパスワードは、必要に応じて変更できるようにしておくと安心です。
+
+## よくある失敗
+
+## SSIDを作っただけで安心する
+
+一番多い失敗です。
+
+`MyHome_Guest` というSSIDを作っても、それが `lan` に紐づいていたら、ゲスト端末はMain LANにいます。
+
+確認します。
+
+```sh
+uci show wireless | grep -E 'MyHome_Guest|ssid|network'
+```
+
+`network='guest'` になっているか見ます。
+
+## ゲスト端末がIPを取れない
+
+DHCPが動いていない、またはDHCP通信がfirewallで止まっている可能性があります。
+
+確認します。
+
+```sh
+uci show dhcp.guest
+uci show firewall | grep -E 'Allow-Guest-DHCP|guest'
+logread | grep -i dnsmasq | tail -n 80
+```
+
+`Allow-Guest-DHCP` を確認します。
+
+## Webサイトが開けない
+
+DNSが通っていない可能性があります。
+
+確認します。
+
+```sh
+uci show firewall | grep -E 'Allow-Guest-DNS|guest'
+logread | grep -i dnsmasq | tail -n 80
+```
+
+`Allow-Guest-DNS` を確認します。
+
+ゲスト端末側でIPアドレス直打ちは通るのに、ドメイン名が開けない場合はDNSを疑います。
+
+## ゲスト端末からLuCIが開けてしまう
+
+guest zoneのInputやfirewallルールを確認します。
+
+```sh
+uci show firewall | grep -E 'guest|input|Allow-|22|80|443'
+```
+
+ゲスト端末から `https://192.168.1.1` や `ssh root@192.168.1.1` へ入れないことを確認します。
+
+管理画面やSSHは、ゲストWi-Fiから見せないほうが安全です。
+
+## ゲスト端末からNASやプリンターが見える
+
+guest → lan forwardingを作っていないか確認します。
+
+```sh
+uci show firewall | grep -E 'forwarding|guest|lan'
+```
+
+`guest` から `lan` へのforwardingがある場合は、意図したものか確認します。
+
+通常のゲストWi-Fiでは、guest → lanは作りません。
+
+## SSIDを増やしすぎた
+
+OpenWrtではSSIDを増やせます。
+
+でも、SSIDを増やしすぎると管理が大変になります。
+
+家庭なら、最初はこれくらいで十分です。
+
+```txt
+MyHome
+MyHome_IoT
+MyHome_Guest
+```
+
+店舗なら、これくらいです。
+
+```txt
+Shop_Staff
+Shop_Guest
+Shop_Device
+```
+
+役割を説明できないSSIDは、作らないほうが管理しやすいです。
+
+## 運用メモを残す
+
+設定したら、簡単なメモを残しておきます。
+
+```txt
+ゲストWi-Fi設定:
+
+SSID:
+  MyHome_Guest
+
+network:
+  guest
+
+IP:
+  192.168.2.1/24
+
+DHCP:
+  192.168.2.100-199
+  leasetime: 2h
+
+firewall:
+  guest input: REJECT
+  guest output: ACCEPT
+  guest forward: REJECT
+  guest -> wan: allow
+  guest -> lan: reject
+
+Traffic Rules:
+  Allow-Guest-DHCP
+  Allow-Guest-DNS
+
+確認:
+  ゲスト端末でWeb OK
+  192.168.1.1へアクセス不可
+  NASへアクセス不可
+  SSH不可
+
+バックアップ:
+  backup-LN6001-before-guest-wifi-20260621.tar.gz
+```
+
+こういうメモがあると、半年後の自分が助かります。
+
+本当に助かります。
 
 ## まとめ
 
-ゲストWi‑Fiの作成は、次の3つをセットで考えると整理しやすいです:
+ゲストWi-Fiは、SSIDを追加するだけでは完成しません。
 
-1. **独立したネットワーク作成**: Guest用のIPアドレス範囲（192.168.2.0/24）
-2. **Guest用SSID作成**: Guestネットワークへ紐付け
-3. **firewall zone設定**: Guest→LAN通信を遮断し、Guest→WAN通信のみ許可
+大事なのは、ゲスト端末を本体LANから分けることです。
 
-設定後は必ずGuest端末から実際に確認します。インターネットへ出られること、LAN内の機器へアクセスできないことの両方を確認して初めて、分離が機能したと言えます。
+そのためには、次の4点セットで考えます。
 
-最初から細かい制御を増やすより、「GuestをLANへ入れない」という基本分離を確実に作るほうが重要です。
+```txt
+SSID
+network
+DHCP
+firewall zone
+```
+
+基本方針はこうです。
+
+- guest → wan は許可
+- guest → lan は拒否
+- guest → LuCI / SSH は拒否
+- DHCPとDNSだけ許可
+- 実端末でLANへ届かないことを確認する
+
+ゲストWi-Fiは、名前を作るだけではなく、ちゃんと“ゲストの部屋”を作るイメージです。
+
+ゲストにはインターネットだけ使ってもらう。  
+家の中や店の裏側には入れない。
+
+この考え方ができると、家庭でも店舗でもかなり安心してWi-Fiを出せるようになります。
 
 ![まず見るところ](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/007/diagram-03.png)
 
+## 次に読むなら
+
+ゲストWi-Fiを作ったら、次は目的に合わせて進みます。
+
+- [firewall zonesの考え方](https://note.com/ikmsan/n/nfe0609ff7bd4)
+- [家族向けフィルタリング](https://note.com/ikmsan/n/n284bb49cd1e3)
+- [VLANで社内・ゲストネットワークを分ける](https://note.com/ikmsan/n/n516c42447850)
+- [店舗向け構成例](https://note.com/ikmsan/n/n506a774c0680)
+- [つながらない時の切り分け](https://note.com/ikmsan/n/n1ab2d47c6d10)
+
+ゲストWi-Fiのfirewallをちゃんと理解したい人は、firewall zonesの記事へ。
+
+店舗や小さなオフィスでStaff / Guest / Deviceまで分けたい人は、VLANや店舗向け構成例へ進むと読みやすいです。
+
+## CLI例の前提
+
+この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。
+
+LuCIの画面名、firewall表示、Wi-Fi radio名、`uci show` の出力は、ファームウェア更新や設定状態によって変わることがあります。
+
+無線の国設定、送信出力、DFS関連の値は変更しません。
+
+記事の内容と実際の画面が少し違う場合は、まずバックアップを取り、Linksys公式サポートやOpenWrtの最新ドキュメントも確認してください。
+
 ## よくある質問
 
-### ゲストWi-FiはSSIDを分けるだけで十分？
+### ゲストWi-FiはSSIDを追加するだけでいい？
 
-十分ではありません。Guest用のネットワークと firewall zone も分けて、LANへの通信を止める必要があります。
+いいえ。
 
-### ゲストWi-Fiからルーター管理画面は見えないようにできる？
+SSIDを追加しただけでは、メインLANから分離できていない場合があります。
 
-できます。Traffic Ruleで Guest から `192.168.1.1` へのアクセスを拒否する設定を入れると分かりやすいです。
+ゲストWi-Fiとして使うなら、guest network、DHCP、firewall zoneまで作るのがおすすめです。
 
-### 家庭でもゲストWi-Fiは作ったほうがいい？
+### ゲストWi-Fiからインターネットだけ使わせたい時は？
 
-来客があるなら作っておく価値があります。
+guest zoneを作り、guest → wanだけ許可します。
 
-家庭内機器と来客端末を分けるだけでも、かなり整理しやすくなります。IoT機器が増えている家庭ほど、Guest分離のメリットが出やすいです。
+guest → lanは許可しません。
+
+また、guest zoneのInputを `REJECT` にする場合は、DHCPとDNSだけTraffic Rulesで許可します。
+
+### ゲスト端末がIPアドレスを取れません
+
+DHCP設定かfirewallのDHCP許可を確認します。
+
+`Allow-Guest-DHCP` があるか、guest DHCP Serverが有効かを見てください。
+
+### ゲスト端末でWebサイトが開けません
+
+DNSが通っていない可能性があります。
+
+`Allow-Guest-DNS` があるか、ゲスト端末が `192.168.2.x` のIPアドレスを取れているか確認してください。
+
+### ゲストWi-FiからLuCIへ入れてしまいます
+
+guest zoneのInputやfirewall ruleを確認してください。
+
+通常のゲストWi-Fiでは、LuCIやSSHへ入れないようにします。
+
+### ゲストWi-FiにAdblockを適用してもいい？
+
+できます。
+
+ただし、最初は分離を優先します。
+
+AdblockやFamily DNSは、その後で必要に応じて追加するのがおすすめです。
+
+### ゲストWi-Fiを2.4GHzにも出したほうがいい？
+
+環境によります。
+
+スマートフォンやPC中心なら5GHzで十分なことが多いです。
+
+遠い部屋や古い端末向けに使わせたい場合は、2.4GHzにも出す選択肢があります。
 
 ## 参考リンク
 
 - Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/
-- Linksys OpenWRT WiFi settings: https://support.linksys.com/kb/article/221-en/?section_id=175
+- OpenWrt ルーターの複数SSIDセグメント分けをする方法 Velop WRT Pro 7: https://support.linksys.com/kb/article/7046/
+- Velop WRT Pro 7 OpenWrt ルーターのWiFi設定の変更方法: https://support.linksys.com/kb/article/7037-jp/
+- OpenWrt Wiki - Guest Wi-Fi using LuCI: https://openwrt.org/docs/guide-user/network/wifi/guestwifi/configuration_webinterface
+- OpenWrt Wiki - Firewall configuration: https://openwrt.org/docs/guide-user/firewall/firewall_configuration
 
 ## この連載で使っているOpenWrtルーター
 

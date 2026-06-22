@@ -1,300 +1,1038 @@
 <!-- mirror-source: articles/009-sqm-latency.md -->
 
-# LN6001-JPが快適な理由: ハードウェアアクセラレーションを理解する【OpenWrt集中連載009】
+# 子ども用Wi-Fiは“止める”より“分ける”から｜Family DNSと時間ルールを無理なく使う【OpenWrt集中連載009】
 
-OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
+子ども用端末のネットワーク設定、けっこう悩みます。
 
-この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。
+スマートフォン。  
+タブレット。  
+学校用PC。  
+ゲーム機。  
+動画用のテレビ。  
+学習アプリ。  
+オンライン授業。  
+ついでにスマートスピーカーやIoT機器。
 
-LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。
+全部を家族用Wi-Fiに入れておけば、とりあえず動きます。
 
-このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。
+でも、あとからこう思うことがあります。
 
-## 要約
+「子ども用端末だけDNSフィルタリングしたい」  
+「夜だけインターネットを止めたい」  
+「学校用PCは止めたくない」  
+「スマート家電と子ども用端末は分けたい」  
+「でも、家族全員のWi-Fiまで壊したくない」
 
-LN6001-JPの魅力は、Wi‑Fi 7対応だけではありません。
+ここでいきなり強い制限を入れると、だいたい家庭内サポートセンターが開業します。
 
-この機種は Qualcommチップセットに最適化されており、SFE、NSS、ECM、PPE のようなハードウェアアクセラレーションを活かして、高いスループットと安定性を両立しやすいのが特徴です。
+「授業サイトが開かない」  
+「ゲームだけつながらない」  
+「動画が止まる」  
+「親のスマホまで影響してる」  
+「結局どの設定を戻せばいいの？」
 
-一般的な家庭用ルーターでは、通信量や端末数が増えるほどCPU負荷が増え、混雑時に遅延や不安定さが出やすくなります。
+つらいです。
 
-一方でLN6001-JPは、通信を高速経路へ逃がす仕組みを持っているため、動画視聴、クラウド同期、VPN、オンライン会議、ゲームなどが重なっても崩れにくい方向で設計されています。
+なので、家族向けフィルタリングで最初にやることは、強く止めることではありません。
 
-単純に「CPUが速い」というより、「CPUだけに頼らず処理を分散しやすい」ことが、この機種の快適さにつながっています。
+まずは **分けること** です。
 
-この記事では、LN6001-JPの快適さを支えている Qualcomm のハードウェアアクセラレーションを、OpenWrt系ルーター初心者にも分かりやすく整理します。設定項目として存在しますが、調整済みですので変更する必要はありません。
+子ども用SSIDを分ける。  
+子ども用ネットワークを分ける。  
+DNS方針を分ける。  
+必要なら時間ルールを足す。  
+うまくいかなければ戻せるようにする。
+
+この順番がかなり大事です。
+
+LN6001-JPはOpenWrtベースなので、子ども用SSID、DHCP、DNS、firewall zone、時間帯ルールを組み合わせて、家庭のルールに合わせたネットワークを作れます。
+
+ただし、ルーターだけで全部を完全に管理しようとすると無理が出ます。
+
+この記事では、子ども用SSIDを作り、Family DNSと夜間ルールを段階的に入れる考え方をまとめます。
+
+> この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使いながら、家庭・小さなオフィス・店舗でOpenWrtベースルーターを現実的に使う方法をまとめています。  
+> 連載目次: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](https://note.com/ikmsan/n/ndf7569fea475)
+
+## 今日のゴール
+
+この記事のゴールは、子ども用端末を完全に管理することではありません。
+
+まずは、ここまでできればOKです。
+
+- 子ども用SSIDを分ける理由が分かる
+- 子ども用ネットワークを別サブネットにできる
+- kids用firewall zoneを作れる
+- DHCPでFamily DNSを配れる
+- 夜間だけkids → wanを止める考え方が分かる
+- DoH、VPN、モバイル回線では迂回されることを理解できる
+- 学校用サービスが壊れた時に戻し方を考えられる
+
+家庭ネットワークでは、完璧な制御より、説明できる設計のほうが強いです。
+
+まずは、
+
+```txt
+子ども用端末は MyHome_Kids
+親や家族共用端末は MyHome
+IoT機器は MyHome_IoT
+```
+
+くらいに分けるところから始めます。
 
 ![よくある悩み](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/diagram-01.png)
 
-## この記事でわかること
+## 先にざっくり結論
 
-- LN6001-JPのハードウェアアクセラレーションが速い理由
-- SFE、NSS、ECM、PPE の役割のざっくりした見方
-- LN6001-JPで現実的なQoSと遅延対策の進め方
-- 遅延改善をどう確認すればよいか
+家族向けフィルタリングは、次の順番で小さく始めるのがおすすめです。
 
-## こんな人に向いています
+1. **子ども用SSIDを分ける**
+2. **子ども用ネットワークを別サブネットにする**
+3. **kids用firewall zoneを作る**
+4. **DHCPでFamily DNSを配布する**
+5. **必要ならAdblockを併用する**
+6. **夜間だけkids → wanを止める**
+7. **学校用サービスや必要なアプリは例外対応する**
+8. **DoH、VPN、モバイル回線では迂回されることを理解しておく**
 
-- 家族の同時利用で会議やゲームが不安定になる
-- 回線速度より混雑時の体感を改善したい
-- LN6001-JPの速さを活かしたままQoSを整えたい
+最初から全部を完璧に止めようとしないほうがいいです。
 
-![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/diagram-02.png)
+家庭では、強すぎるフィルタリングより、
 
-## まずはここまでで十分
-
-最初から細かいQoS設定を詰め込む必要はありません。
-
-LN6001-JPでは、まず「Qualcommの高速経路が生きている状態」を理解することが重要です。
-
-最初は次の4つだけで十分です。
-
-1. 有線LANで実効速度を測る
-2. Qualcommの加速系モジュールを確認する
-3. ファームウェア標準のQoSや優先制御を使う
-4. 家族同時利用時に体感が安定しているかを見る
-
-この機種では、「加速を止めてソフトウェアだけで頑張る」より、「高速経路を活かしたまま崩れにくくする」という考え方のほうが実運用に合っています。
-
-特に家庭では、速度ベンチマークの最大値より、「家族が同時利用しても動画や会議が崩れにくいか」のほうが体感差として現れやすくなります。
-
-## 設定を触る前に状態を見る
-
-ハードウェアアクセラレーションやQoSまわりは、闇雲に変更するより、まず現在の状態を読み取るほうが安全です。
-
-```sh
-echo "### system"
-date
-ubus call system board
-uptime
-free
-
-echo "### WAN/WAN6"
-ifstatus wan
-ifstatus wan6
-
-echo "### routes"
-ip route show
-ip -6 route show
+```txt
+どの端末に、どのルールがかかっているか分かる
 ```
 
-負荷の見え方も確認します。
+ことのほうが大事です。
 
-```sh
-echo "### load"
-top -bn1 | head -n 20
+## この記事の前提
 
-echo "### interfaces"
-ip -s link show
-
-echo "### installed acceleration/QoS hints"
-opkg list-installed | grep -Ei 'qos|sqm|nss|ecm|sfe|shortcut|ppe|qca' || true
-```
-
-この段階では設定を変えません。通常時のCPU負荷、インターフェースの送受信量、WAN/WAN6の状態を控えておくと、あとでQoSや回線変更を試した時に比較しやすくなります。
-
-## 速度と遅延は別の問題
-
-スピードテストで1Gbpsが出ていても、オンライン会議中に音声が途切れることがあります。
-
-これは、ルーターや回線側で待ち行列（バッファ）が膨らみ、遅延が悪化するためです。
-
-**混雑制御が効きやすい状況:**
-- 家族の誰かが大容量ファイルをアップロード中に会議音声が途切れる
-- クラウドバックアップが走っている時にゲームが重くなる
-- Netflix視聴中にZoom会議が不安定になる
-- 上り方向の帯域が細い回線（100Mbps以下の上り）を使っている
-
-逆に、単純にWi‑Fi電波が弱い場合や、ISP側そのものが混雑している場合は、ルーター側のQoSだけでは改善しないこともあります。
-
-遅延対策は「常に速くする」ためのものではありませんが、LN6001-JPでは高速経路を活かしやすいため、速度を大きく落とさずに体感を整えられる余地があります。
-
-そのため、速度ベンチマークの最大値だけでなく、「混雑時でも速さと安定を両立できているか」で見るのがポイントです。
-
-## LN6001ならではの加速スタック
-
-Qualcomm QSDK系では、パケット処理を高速化するために複数の加速レイヤが使われます。
-
-代表的なのは次の4つです。
-
-細かい内部構造を完全に理解する必要はありません。ここでは「CPUだけで処理しないための仕組み」として見ると分かりやすいです。
+この記事では、次の構成を前提にします。
 
 ![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-01.png)
 
-この構成のポイントは、単に「CPUが速い」ではなく、通信を高速経路へ逃がせることです。
+AP Bridgeやブリッジモードで使っている場合は、この記事と同じ手順にならないことがあります。
 
-一般的な家庭用ルーターでは、端末数や通信量が増えるほどCPU側の処理が詰まりやすくなります。
+この記事では、LN6001-JPがルーターとしてDHCPとfirewallを担当している前提で進めます。
 
-一方でLN6001-JPは、Qualcommの加速スタックがうまく働くと、NAT、ルーティング、ブリッジ転送、QoS系処理の一部をより効率よく流せます。
+![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/diagram-02.png)
 
-つまりこの機種の強みは、「ソフトウェアだけで頑張る」より、「ハードウェアアクセラレーションを前提に高スループットを維持しやすい」ことにあります。
+## こういう人向けです
 
-## Qualcomm の加速スタックをざっくり見る
+この記事は、次のような人向けです。
 
-QSDK系で遅延やスループットを考える時は、次の順番で見ると整理しやすいです。
+- 子ども用端末だけDNSフィルタリングをかけたい
+- 家族全員へ一律の広告ブロックをかけるのは避けたい
+- 夜間だけ子ども用端末のインターネットを止めたい
+- 学校用PCや学習アプリは使えるようにしておきたい
+- IoT機器やゲーム機を家族のメイン端末と分けたい
+- ルーター側制御の限界も理解したうえで使いたい
+- いきなり厳しい制限ではなく、家庭で説明しやすい構成にしたい
 
-### SFE
+逆に、
 
-SFEは Shortcut Forwarding Engine で、古くからある fastpath です。
-
-CPU負荷を減らしやすく、ソフトウェア処理だけで回すより高速化しやすいのが強みです。
-
-### NSS
-
-NSSは Qualcomm の専用コアへ処理を逃がす仕組みで、QSDKでは中心的な役割です。
-
-ルーティング、NAT、QoS、トンネル、ブリッジ転送などをオフロードできる構成が多く、QSDKの売りでもあります。LN6001-JPの「家庭用でも速い」と感じやすい部分は、この層の恩恵が大きいです。
-
-### ECM
-
-ECMはフロー加速の判断を担当する層です。
-
-NATフロー、ブリッジ、高速転送の可否に関わるので、速さが出るかどうかを見る時にも重要です。
-
-### PPE
-
-PPEは Packet Processing Engine で、L2転送、VLAN、NAT、ACL などに関わるハードウェア処理系です。
-
-特に IPQ807x、IPQ6018、IPQ50xx、IPQ95xx 系では重要で、端末数が増えても処理をさばきやすい土台になります。
-
-### Qualcomm側のQoSレイヤ
-
-一般的なOpenWrt界隈では SQM/CAKE が定番として語られることが多いですが、QSDK系では設計思想が少し異なります。
-
-LN6001-JPのような Qualcomm 系ルーターでは、「CPUで細かく制御する」より、「ハードウェアアクセラレーションを活かしながら混雑を整える」という方向のほうが、製品本来の性能を活かしやすいケースがあります。
-
-QSDKでは、Qualcommの加速経路に乗るQoSや帯域制御を使う考え方が基本です。
-
-ここでは qdisc の細かな種類までは掘りませんが、重要なのは「加速を残したままQoSをかける」方向で考えることです。これが、LN6001-JPの速さと実用性を両立しやすいポイントです。
-
-## LN6001-JPでの現実的な進め方
-
-この機種で遅延対策をする時は、次の順番が現実的です。
-
-1. 有線LANで回線実測値を把握する
-2. 加速系モジュールがどう載っているか確認する
-3. ファームウェア側のQoSや帯域制御があれば、そちらを優先して使う
-4. 特に上り方向の混雑を抑える方向で調整する
-5. 負荷時の ping と体感を見て評価する
-
-### 1. 実効速度を測定する
-
-設定値の基準は契約速度ではなく、実測値です。
-
-1. 有線LAN接続のPCで測定する
-2. [Fast.com](https://fast.com/)、[Speedtest by Ookla](https://www.speedtest.net/)、[Cloudflare Speed Test](https://speed.cloudflare.com/) などで3〜5回測る
-3. 最大値ではなく、普段の時間帯の安定した中間値を見る
-
-夜に悪化する回線もあるため、普段使う時間帯で測ることが重要です。
-
-### 2. まずは加速が生きているか確認する
-
-```sh
-echo "### acceleration modules"
-lsmod | grep shortcut
-lsmod | grep fast
-lsmod | grep nss
-lsmod | grep ecm
-
-echo "### kernel messages"
-dmesg | grep -Ei 'nss|ecm|sfe|ppe|shortcut|qca' | tail -n 80
+```txt
+子どもの端末を完全に制御したい
+モバイル回線もVPNもアプリも全部止めたい
+親子のルール作りは不要で、技術だけで解決したい
 ```
 
-何も出ない場合は、ファームウェア実装やビルド構成が違う可能性があります。
+という目的だと、ルーターだけではかなり難しいです。
 
-逆に、これらが見えているなら、この機種は Qualcomm の高速経路を前提に動いており、それが速さの源になっていると考えたほうが自然です。
+ルーター側の設定は、家庭内ルールの補助として使うのが現実的です。
 
-### 3. 加速を前提にしたQoSを優先する
+## 最初に言葉だけそろえる
 
-まずは、ファームウェアにあるQoS、帯域制御、優先制御のような機能を確認し、Qualcommの加速前提で使える設定を優先します。
+子ども用ネットワークで出てくる言葉を、ざっくり整理しておきます。
 
-この機種の良さは、高速経路を活かしたまま家庭内の混雑に対応しやすいことです。QoSを考える時も、その強みを崩さない方向で進めたほうが自然です。
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-02.png)
 
-### 4. 上り方向から改善を狙う
+ここで一番大事なのは、SSIDとルールをセットで考えることです。
 
-家庭回線では、下りより上りが先に詰まりやすいことがあります。
-
-会議音声やゲームの不安定さは、アップロード側の詰まりが原因になっていることも多いため、まずは上りの混雑を抑える方向で見たほうが効果を感じやすくなります。
-
-### 5. 混雑時に崩れにくくなったかを見る
-
-狙うべき成功条件は「ベンチマーク最高速」ではなく、次の3つです。
-
-- 通常時の速度が大きく落ちていない
-- 負荷時の ping の跳ね上がりが小さくなっている
-- 会議やゲームの体感が以前より安定している
-
-負荷時の比較は、難しいツールを入れなくても最初はこれで十分です。
-
-```sh
-echo "### baseline ping"
-ping -c 20 1.1.1.1
-
-echo "### DNS check"
-nslookup www.google.co.jp
-
-echo "### recent WAN/QoS logs"
-logread | grep -Ei 'wan|qos|sqm|nss|ecm|sfe|ppe|error|warn' | tail -n 100
+```txt
+MyHome_Kids につないだ端末には kids のルールを適用する
 ```
 
-この結果を、クラウド同期や大きなアップロード中にも取り直します。`ping` の平均値だけでなく、最大値が大きく跳ねるかを見ると、混雑時の体感に近い判断がしやすくなります。
+この形にしておくと、あとからかなり管理しやすくなります。
 
-## IPoE/IPv4 over IPv6 環境での注意
+## 家族向けフィルタリングで大事な考え方
 
-Qualcommの加速系は、PPPoE、GRE、VXLAN、IPsec、MAP-E、DS-Lite、L2TP などでオフロード状況が変わることがあります。
+家庭のフィルタリングは、技術だけでは完結しません。
 
-特に IPoE や IPv4 over IPv6 では、トンネルや回線方式によって期待どおりに加速される場合と、そうでない場合があります。
+とくに子ども用端末では、次の3つを分けて考えると運用しやすくなります。
 
-そのため、「加速が有効なはずなのに遅い」「QoSを触ったのに効かない」という時は、回線方式側の制約も疑ったほうが安全です。
+## 1. ネットワークを分ける
 
-## よくある失敗パターン
+まず、子ども用端末をどこへつなぐかを決めます。
 
-- **Wi-Fiの問題をWAN QoSで直そうとする**: 電波が弱い、干渉が強い、端末側が古い場合は、WAN側制御では解決しません。
-- **ISP混雑と家庭内混雑を混同する**: ルーター側で制御できるのは家庭内側の詰まり方です。ISP側の混雑は別問題です。
-- **一般的なOpenWrtのソフトウェア shaping 記事をそのまま当てはめる**: LN6001-JPは設計思想が違います。
-- **加速を切ってスループットを犠牲にしすぎる**: 遅延だけでなく、製品全体の性能を崩すことがあります。
-- **トンネル回線の経路を見落とす**: DS-Lite や IPv4 over IPv6 で期待した場所に制御がかからないことがあります。
+メインSSIDに全部混ぜるのではなく、子ども用SSIDを作るとルールを適用しやすくなります。
+
+```txt
+MyHome        → 親・家族共用端末
+MyHome_Kids   → 子ども用端末
+MyHome_IoT    → IoT機器
+MyHome_Guest  → ゲストWi-Fi
+```
+
+こう分けておくと、DNS、時間制限、firewallルールをSSID単位で考えやすくなります。
+
+最初から完璧に分離しなくても大丈夫です。
+
+まずは「子ども用SSIDはここ」と決めるだけでも前進です。
+
+## 2. DNSで不要な通信先を減らす
+
+DNSフィルタリングは、成人向けコンテンツ、マルウェア、広告・トラッキングなどの一部を名前解決の段階で止める方法です。
+
+端末ごとにアプリを入れなくても、ネットワーク単位で適用できるのが利点です。
+
+ただし、完全ではありません。
+
+DoH、VPN、モバイル回線、アプリ内通信、同一ドメイン配信には効きにくい場合があります。
+
+DNSは「全部止める壁」ではなく、「余計な入口を減らすフィルター」と考えるとちょうどいいです。
+
+## 3. 時間ルールを入れる
+
+夜間だけインターネットを止める。  
+食事時間だけ止める。  
+平日と休日で変える。
+
+こういうルールはfirewallで作れます。
+
+ただし、時間ルールも万能ではありません。
+
+すでに張られている通信がしばらく残ることがあります。  
+アプリによっては、再接続するまで挙動が分かりにくいこともあります。
+
+家庭内では、
+
+```txt
+技術で完全に封じる
+```
+
+より、
+
+```txt
+ルールを説明して、必要な範囲でネットワークが補助する
+```
+
+くらいの考え方が長続きします。
+
+## できることと限界
+
+## できること
+
+LN6001-JP側でできることは、次のようなものです。
+
+- 子ども用SSIDを作る
+- 子ども用ネットワークを別IPアドレス範囲にする
+- 子ども用ネットワークだけFamily DNSを配布する
+- 子ども用ネットワークからLAN内機器へ入れないようにする
+- 夜間だけkids → wanの通信を止める
+- Adblockで広告・トラッキング通信を減らす
+- DNS Reportやログで問題を切り分ける
+- 必要なドメインをAllowlistへ戻す
+
+## できないこと
+
+一方で、次のような限界があります。
+
+- すべての不適切コンテンツを完全に止めることはできない
+- モバイル回線へ切り替えられると、ルーター側の制御は効かない
+- VPNアプリを使われると、DNSやfirewallルールを迂回される場合がある
+- DoHを使うアプリやブラウザは、ルーターDNSを迂回する場合がある
+- 端末内のアプリ利用時間まではルーターだけで細かく管理できない
+- 学校管理端末は家庭側で変更できない設定がある
+- 誤ブロックで学習サービスや認証が壊れることがある
+
+ここは最初に家族内で共有しておくと、変な期待値になりにくいです。
+
+ルーター側フィルタリングは万能ではありません。
+
+でも、家庭内ネットワークを整理する道具としてはかなり役立ちます。
+
+## 設定前にバックアップを取る
+
+子ども用SSID、DHCP、DNS、firewallを触る前にバックアップを取ります。
+
+LuCIでは次の手順です。
+
+1. **System** → **Backup / Flash Firmware** を開く
+2. **Generate archive** をクリックする
+3. `.tar.gz` ファイルをPCへ保存する
+4. ファイル名に日付と状態を入れる
+
+例:
+
+```txt
+backup-LN6001-before-family-filter-20260621.tar.gz
+```
+
+SSHで状態メモも残すなら、次を実行します。
+
+```sh
+BACKUP_DIR="/root/family-filter-before-$(date +%Y%m%d-%H%M)"
+mkdir -p "$BACKUP_DIR"
+
+for cfg in network wireless dhcp firewall; do
+  cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
+  uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
+done
+
+cat /tmp/dhcp.leases > "$BACKUP_DIR/dhcp-leases.txt"
+wifi status > "$BACKUP_DIR/wifi-status.json"
+logread | tail -n 200 > "$BACKUP_DIR/logread-tail.txt"
+
+ls -l "$BACKUP_DIR"
+```
+
+バックアップにはSSID、Wi-Fiパスワード、DNS、ネットワーク設定が含まれることがあります。
+
+SNS、公開リポジトリ、記事のスクリーンショットへそのまま出さないようにしてください。
+
+バックアップがあると、人は少し落ち着いて設定できます。
+
+OpenWrt系ルーターでは、これが本当に大事です。
+
+## ステップ1: 子ども用ネットワークを作る
+
+まず、子ども用のネットワークを作ります。
+
+ここでは `kids` というinterfaceを作り、`192.168.30.0/24` を使います。
+
+## LuCIでbridge deviceを作る
+
+1. **Network** → **Interfaces** を開く
+2. **Devices** タブを開く
+3. **Add device configuration** をクリックする
+4. 次のように設定する
+
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-03.png)
+
+5. **Save** をクリックする
+
+Wi-Fiだけで子ども用SSIDを作る場合、Bridge portsは空のままで進めます。
+
+有線ポートも子ども用ネットワークに分けたい場合は、VLAN設計が必要になります。
+
+## LuCIでkids interfaceを作る
+
+1. **Network** → **Interfaces** を開く
+2. **Interfaces** タブで **Add new interface** をクリックする
+3. 次のように設定する
+
+![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-04.png)
+
+4. **Create interface** をクリックする
+5. **General Settings** で次を設定する
+
+![表画像 table-05](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-05.png)
+
+6. **DHCP Server** タブを開く
+7. DHCP Serverが未設定なら **Setup DHCP Server** をクリックする
+8. 次のように設定する
+
+![表画像 table-06](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-06.png)
+
+この時点では、まだDNS方針は入れていません。
+
+まずは子ども用ネットワークを別IPアドレス範囲として作ります。
+
+## ステップ2: 子ども用SSIDを作る
+
+次に、子ども用端末を接続するSSIDを作ります。
+
+1. **Network** → **Wireless** を開く
+2. 5GHz radioの **Add** をクリックする
+   - LN6001-JPでは、Linksys公式手順上は `wifi1` が5GHz radioです
+3. **Interface Configuration** の **General Setup** で次を設定する
+
+![表画像 table-07](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-07.png)
+
+4. **Wireless Security** タブを開く
+5. 次のように設定する
+
+![表画像 table-08](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-08.png)
+
+6. **Save** をクリックする
+
+ここで大事なのは、Networkを必ず `kids` にすることです。
+
+SSID名が `MyHome_Kids` でも、Networkが `lan` のままだと、子ども用SSIDの見た目をしたメインLANになります。
+
+ゲストWi-Fiと同じで、SSID名だけでは分離になりません。
+
+## 子ども用SSIDは2.4GHzか5GHzか
+
+子ども用端末がスマートフォン、タブレット、学校用PCなら、まず5GHzでよいことが多いです。
+
+ゲーム機や古い端末、遠い部屋で使う端末がある場合は、2.4GHzも検討します。
+
+![表画像 table-09](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-09.png)
+
+最初は5GHzで作り、必要なら2.4GHzにも同じkids networkのSSIDを追加するくらいで大丈夫です。
+
+## ステップ3: kids firewall zoneを作る
+
+子ども用ネットワークからインターネットへ出られるようにしつつ、メインLANへは入れないようにします。
+
+1. **Network** → **Firewall** を開く
+2. **Zones** タブを開く
+3. **Add** をクリックする
+4. 次のように設定する
+
+![表画像 table-10](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-10.png)
+
+5. **Inter-Zone Forwarding** で次を設定する
+
+![表画像 table-11](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-11.png)
+
+6. **Save** をクリックする
+
+この設定では、kidsからwanへは出られます。
+
+一方で、kidsからlanへのforwardingは作らないため、メインLAN側のNAS、PC、プリンター、ルーター管理画面へは届きにくくなります。
+
+ただし、Inputを `REJECT` にしているため、DHCPとDNSを明示的に許可する必要があります。
+
+ここはハマりやすいところです。
+
+## ステップ4: kids用DHCPとDNSを許可する
+
+kids端末がIPアドレスを受け取り、DNSを使えるようにします。
+
+## DHCPを許可する
+
+1. **Network** → **Firewall** → **Traffic Rules** を開く
+2. **Add** をクリックする
+3. 次のように設定する
+
+![表画像 table-12](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-12.png)
+
+4. **Save** をクリックする
+
+## DNSを許可する
+
+1. **Traffic Rules** で **Add** をクリックする
+2. 次のように設定する
+
+![表画像 table-13](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-13.png)
+
+3. **Save** をクリックする
+
+この2つがないと、kids zoneのInput `REJECT` によって、端末がIPアドレスを取れなかったり、DNSが使えなかったりします。
+
+Wi-FiにはつながるのにWebが開けない時は、まずここを見ます。
+
+## ステップ5: Family DNSを配布する
+
+次に、子ども用ネットワークだけFamily DNSを配布します。
+
+ここでは例として、Cloudflare for Familiesの「マルウェア + 成人向けコンテンツ」向けDNSを使います。
+
+```txt
+1.1.1.3
+1.0.0.3
+```
+
+LuCIでは次のように設定します。
+
+1. **Network** → **Interfaces** を開く
+2. `kids` interfaceの **Edit** をクリックする
+3. **DHCP Server** → **Advanced Settings** を開く
+4. **DHCP Options** に次を追加する
+
+```txt
+6,1.1.1.3,1.0.0.3
+```
+
+5. **Save** をクリックする
+6. 画面上部の保留中の変更を確認し、**Save & Apply** をクリックする
+
+この設定は、kidsネットワークの端末へ、
+
+```txt
+DNSサーバーとして 1.1.1.3 と 1.0.0.3 を使ってね
+```
+
+と配るものです。
+
+DNS設定を変更した後は、子ども用端末のWi-Fiを一度切断して再接続します。
+
+端末によっては、再起動したほうが早いこともあります。
+
+## Family DNSの選び方
+
+Family DNSには複数の選択肢があります。
+
+![表画像 table-14](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-14.png)
+
+最初は、仕組みが分かりやすいCloudflare for Familiesの `1.1.1.3` / `1.0.0.3` から試すのが扱いやすいです。
+
+IPv6も子ども用ネットワークへ配る場合は、Cloudflare for FamiliesのIPv6アドレスも確認します。
+
+```txt
+2606:4700:4700::1113
+2606:4700:4700::1003
+```
+
+ただし、IPv6をkidsへ配る場合は、IPv6側のfirewallやDNS方針も合わせて見ます。
+
+最初はIPv4で構成を安定させ、その後でIPv6を検討するくらいでも大丈夫です。
+
+## Google SafeSearchについて
+
+Google SafeSearchの強制は、単にDNSサーバーを変えるだけではありません。
+
+Googleの検索ドメインを `forcesafesearch.google.com` へ向けるDNS設定が必要になります。
+
+家庭で最初に始めるなら、
+
+```txt
+kidsへFamily DNSを配る
+端末側の検索・アプリ・OSのペアレンタル設定も併用する
+```
+
+くらいが現実的です。
+
+SafeSearch強制は、必要になってから個別に検討します。
+
+## AdblockとFamily DNSの使い分け
+
+008の記事で扱ったAdblockと、この記事のFamily DNSは役割が少し違います。
+
+![表画像 table-15](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-15.png)
+
+DNSだけで全部をやろうとしないのがコツです。
+
+子ども用端末では、Family DNS、OS側ペアレンタル設定、必要に応じてfirewall時間ルールを組み合わせると現実的です。
+
+## Force Local DNSとの関係
+
+008の記事でAdblockを導入し、Force Local DNSを有効にしている場合は注意が必要です。
+
+Force Local DNSは、端末が外部DNSへ直接行こうとした時に、ルーター側DNSへ寄せるための設定です。
+
+一方で、この記事のFamily DNS配布は、kids端末へ `1.1.1.3` / `1.0.0.3` のような外部DNSを使わせる方法です。
+
+つまり、設定の組み合わせによっては意図がぶつかることがあります。
+
+最初は次のどちらかに分けて考えると安全です。
+
+## パターンA: kidsはFamily DNSを直接使う
+
+- kids DHCPで `6,1.1.1.3,1.0.0.3` を配布する
+- Force Local DNSの影響範囲を確認する
+- 端末側でDNSがCloudflare Family DNSになっているか確認する
+
+## パターンB: ルーター側Adblockを使う
+
+- 端末にはLN6001-JPをDNSとして使わせる
+- AdblockとAllowlistで調整する
+- DoH対策は端末側設定やbanIPで考える
+
+最初は、構成を混ぜすぎないほうがトラブルを切り分けやすくなります。
+
+「kidsだけFamily DNS」「メインLANはAdblock」など、ネットワークごとに方針を決めてから設定します。
+
+## ステップ6: 夜間だけkidsのインターネットを止める
+
+DNSフィルタリングだけでなく、時間帯で通信を止めたい場合はfirewallのTraffic Ruleを使います。
+
+ここでは例として、子ども用ネットワークからインターネットへの通信を、夜22:00から朝6:00まで止めます。
+
+日付をまたぐ時間帯は、2つのルールに分けると分かりやすいです。
+
+- 22:00〜23:59
+- 00:00〜06:00
+
+## LuCIで夜間ルールを作る
+
+1. **Network** → **Firewall** → **Traffic Rules** を開く
+2. **Add** をクリックする
+3. 1つ目のルールを作る
+
+![表画像 table-16](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-16.png)
+
+4. **Save** をクリックする
+5. 2つ目のルールを作る
+
+![表画像 table-17](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-17.png)
+
+6. **Save** をクリックする
+7. ルールの順番を確認する
+8. **Save & Apply** をクリックする
+
+firewallの時間ルールは、ルールの順番や既存接続の扱いによって見え方が変わります。
+
+すでに張られている通信がすぐ切れないこともあるため、動作確認では端末のWi-Fiを切断・再接続したり、アプリを再起動したりして確認します。
+
+## CLIで夜間ルールを作る例
+
+UCIで作る場合は、バックアップを取ってから行います。
+
+```sh
+cp /etc/config/firewall /etc/config/firewall.backup.$(date +%Y%m%d-%H%M)
+
+uci add firewall rule
+uci set firewall.@rule[-1].name='Block-Kids-WAN-Night-1'
+uci set firewall.@rule[-1].src='kids'
+uci set firewall.@rule[-1].dest='wan'
+uci set firewall.@rule[-1].proto='all'
+uci set firewall.@rule[-1].target='REJECT'
+uci set firewall.@rule[-1].start_time='22:00:00'
+uci set firewall.@rule[-1].stop_time='23:59:59'
+
+uci add firewall rule
+uci set firewall.@rule[-1].name='Block-Kids-WAN-Night-2'
+uci set firewall.@rule[-1].src='kids'
+uci set firewall.@rule[-1].dest='wan'
+uci set firewall.@rule[-1].proto='all'
+uci set firewall.@rule[-1].target='REJECT'
+uci set firewall.@rule[-1].start_time='00:00:00'
+uci set firewall.@rule[-1].stop_time='06:00:00'
+
+uci changes firewall
+uci commit firewall
+/etc/init.d/firewall restart
+```
+
+曜日を指定する場合は、LuCIで作ってから `uci show firewall` で実際の項目名を確認するのがおすすめです。
+
+ファームウェアやLuCIのバージョンで表示や項目が変わることがあります。
+
+## 設定後に確認すること
+
+設定後は、実際の子ども用端末で確認します。
+
+LuCIの画面だけ見て安心したくなりますが、最後は端末側で見ます。
+
+## 子ども用SSIDに接続できるか
+
+端末を `MyHome_Kids` へ接続します。
+
+期待する状態は次です。
+
+```txt
+IP address: 192.168.30.x
+Gateway: 192.168.30.1
+DNS: 1.1.1.3 / 1.0.0.3
+```
+
+端末によってはDNS表示が見えにくいことがあります。
+
+PCならOS側のDNS表示コマンドで確認します。
+
+Mac:
+
+```sh
+scutil --dns | grep nameserver
+```
+
+Windows PowerShell:
+
+```powershell
+Get-DnsClientServerAddress
+```
+
+## インターネットへ出られるか
+
+通常時間帯にWebサイトを開きます。
+
+```sh
+ping -c 4 8.8.8.8
+ping -c 4 example.com
+```
+
+`8.8.8.8` に届くのに `example.com` が引けない場合はDNSを確認します。
+
+どちらも届かない場合は、kids → wan forwardingやWAN接続を確認します。
+
+## LAN内機器へ届かないか
+
+子ども用SSIDにつないだ端末から、メインLAN側の機器へアクセスしてみます。
+
+```txt
+https://192.168.1.1
+http://192.168.1.x
+ssh root@192.168.1.1
+```
+
+期待する状態は、届かないことです。
+
+ただし、プリンターやNASなどを子ども用端末から使わせたい場合は、必要な機器だけ例外ルールを作る必要があります。
+
+最初から広く許可せず、必要なものだけ許可するほうが安全です。
+
+## 夜間ルールが効くか
+
+設定した時間帯に、子ども用SSIDからWebサイトを開いて確認します。
+
+すぐに止まらない場合は、端末のWi-Fiを切断・再接続し、アプリやブラウザも再起動します。
+
+時間ルールは「新しい通信を止める」動きに見えることがあるため、すでに張られた通信がしばらく残る場合があります。
+
+## CLIで状態を確認する
+
+メインLAN側からSSHでLN6001-JPへ入り、状態を確認します。
+
+```sh
+echo "### kids interface"
+uci show network.kids
+ifstatus kids
+
+echo "### kids dhcp"
+uci show dhcp.kids
+
+echo "### firewall kids"
+uci show firewall | grep -E 'kids|Allow-Kids|Block-Kids'
+
+echo "### wireless kids"
+uci show wireless | grep -E 'kids|MyHome_Kids|ssid|network'
+
+echo "### dhcp leases"
+cat /tmp/dhcp.leases
+
+echo "### dns logs"
+logread | grep -Ei 'dnsmasq|kids|dhcp' | tail -n 80
+```
+
+firewallの実際の展開を見たい場合は、次も使えます。
+
+```sh
+iptables-save 2>/dev/null | grep -i kids -A5 -B5
+ip6tables-save 2>/dev/null | grep -i kids -A5 -B5
+```
+
+最初は `uci show firewall` だけでも十分です。
+
+## よくある失敗と対処
+
+## 子ども用端末がIPアドレスを取れない
+
+期待するIPアドレスは `192.168.30.x` です。
+
+取得できない場合は、次を確認します。
+
+- 子ども用SSIDのNetworkが `kids` になっているか
+- `kids` interfaceでDHCP Serverが有効になっているか
+- `Allow-Kids-DHCP` があるか
+- 子ども用端末のWi-Fiを一度切断・再接続したか
+
+CLIでは次を確認します。
+
+```sh
+uci show dhcp.kids
+logread | grep -i dnsmasq | tail -n 50
+cat /tmp/dhcp.leases
+```
+
+## DNSフィルタリングが効かない
+
+次を確認します。
+
+- kids DHCP Optionsに `6,1.1.1.3,1.0.0.3` が入っているか
+- 端末が新しいDHCP情報を受け取っているか
+- 端末側に固定DNSが設定されていないか
+- 端末側でDoHが有効になっていないか
+- VPNアプリを使っていないか
+- Force Local DNSやAdblock設定と衝突していないか
+
+端末側でDNSを確認します。
+
+Macなら:
+
+```sh
+scutil --dns | grep nameserver
+```
+
+Windowsなら:
+
+```powershell
+Get-DnsClientServerAddress
+```
+
+## 学校用サービスや学習アプリが動かない
+
+Family DNSやAdblockで誤ブロックされている可能性があります。
+
+まず切り分けます。
+
+- 一時的に通常DNSへ戻す
+- Adblockを止めて確認する
+- DNS Reportやログを見る
+- 必要なドメインをAllowlistへ追加する
+- 子ども用SSIDではなくメインSSIDで試して差を見る
+
+学校用PCは、学校側の管理ポリシーやVPN、独自DNSを使っている場合があります。
+
+家庭側だけで原因を決めつけず、端末側の管理状況も確認します。
+
+## 夜間ルールが効かない
+
+時間ルールが効かない時は、次を確認します。
+
+- LN6001-JPのタイムゾーンが `Asia/Tokyo` になっているか
+- ルールのStart Time / Stop Timeが正しいか
+- 日付をまたぐ時間帯を2つのルールに分けているか
+- ルールの順番が適切か
+- kids → wanの通信を許可するルールより前にブロックルールがあるか
+- 既存接続が残っていないか
+
+タイムゾーンは、LuCIの **System** → **System** で確認できます。
+
+CLIでは次を見ます。
+
+```sh
+date
+uci show system | grep timezone
+uci show firewall | grep -E 'Block-Kids|start_time|stop_time'
+```
+
+## ゲームや動画だけ止まらない
+
+ゲームや動画アプリは、すでに張った接続を維持したり、別の通信経路を使ったりすることがあります。
+
+時間ルールを入れても、すぐに見た目が変わらない場合があります。
+
+確認時は、次も試します。
+
+- 端末のWi-Fiを切断・再接続する
+- アプリを完全終了して起動し直す
+- 端末を再起動する
+- VPNやモバイル回線を使っていないか確認する
+
+ルーター側でできる制限には限界があります。
+
+ゲーム機やスマートフォンでは、OS側やアカウント側のペアレンタル設定も併用するのがおすすめです。
+
+## 端末ごとに管理したい場合
+
+子ども用SSID全体ではなく、端末ごとに管理したい場合は、固定DHCP割り当てを使います。
+
+1. **Network** → **DHCP and DNS** を開く
+2. **Static Leases** を確認する
+3. 子ども用端末のMACアドレスに固定IPを割り当てる
+
+例:
+
+![表画像 table-18](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-18.png)
+
+そのうえで、firewallルールをsource IPごとに分けることもできます。
+
+ただし、MACアドレスのランダム化が有効な端末では、端末側のプライベートアドレス設定によってMACアドレスが変わることがあります。
+
+家庭内で固定DHCPを使う場合は、端末側のWi-Fi設定も確認してください。
+
+## 子ども用ネットワークでプリンターを使わせたい場合
+
+kids → lanを完全に拒否すると、メインLAN側のプリンターやNASへ届きません。
+
+プリンターだけ使わせたい場合は、kids → lanを広く許可するのではなく、プリンターのIPアドレスだけ例外にします。
+
+例:
+
+![表画像 table-19](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/table-19.png)
+
+プリンターは機種によって使う通信が違います。
+
+印刷だけ許可したつもりでも、探索、AirPrint、IPP、mDNSなどが絡むことがあります。
+
+最初は無理に例外を増やさず、本当に必要な機器だけ検証しながら許可します。
+
+## DoH、VPN、モバイル回線への考え方
+
+子ども用フィルタリングでよくあるのが、DoH、VPN、モバイル回線による迂回です。
+
+- DoH: ブラウザやアプリがHTTPSでDNS問い合わせを行う
+- VPN: 端末から外部VPNへ入り、家庭内ルーターのDNSやfirewallを迂回する
+- モバイル回線: Wi-Fiではなく携帯回線で通信する
+
+ルーター側で全部を完全に防ぐのは難しいです。
+
+家庭では、次の順番で考えるのが現実的です。
+
+1. まず子ども用SSIDを作る
+2. Family DNSやAdblockでDNS方針を決める
+3. 端末側のDoH設定を確認する
+4. 必要ならbanIPなどでDoH対策を検討する
+5. OSやアカウント側のペアレンタル設定を併用する
+6. モバイル回線やVPNについては家庭内ルールとして話す
+
+技術で穴を全部埋めようとすると、親子どちらもしんどくなります。
+
+ルーター側設定は、家庭内ルールの補助として使うのが長続きします。
+
+## 家庭内で説明しやすいルールにする
+
+フィルタリングは、設定が複雑になるほど説明しづらくなります。
+
+家庭では、次のくらいの説明にしておくと運用しやすいです。
+
+```txt
+MyHome:
+  親と家族共用端末用。通常のDNSとAdblock。
+
+MyHome_Kids:
+  子ども用端末。Family DNSを使う。
+  夜22時から朝6時まではインターネットを止める。
+
+MyHome_IoT:
+  IoT機器用。必要最小限の通信だけ。
+```
+
+「なぜ分けているのか」を説明できることが大事です。
+
+SSID名、パスワード、時間ルール、例外対応をメモしておくと、あとから家族内で共有しやすくなります。
+
+## 運用メモのテンプレート
+
+設定したら、次のようなメモを残しておきます。
+
+```txt
+子ども用SSID:
+  MyHome_Kids
+
+子ども用ネットワーク:
+  192.168.30.0/24
+
+DNS:
+  Cloudflare for Families 1.1.1.3 / 1.0.0.3
+
+時間ルール:
+  22:00-06:00 は kids → wan を拒否
+
+例外:
+  学校用PCは必要に応じて別ルール
+  プリンター利用は未設定 / 必要時に検討
+
+確認日:
+  2026-06-21
+
+バックアップ:
+  backup-LN6001-before-family-filter-20260621.tar.gz
+```
+
+家庭内ネットワークでも、こうしたメモを残しておくと、あとから自分が助かります。
+
+未来の自分は、だいたい設定内容を忘れています。
 
 ## まとめ
 
-LN6001-JPの本当の強みは、Wi‑Fi 7対応だけではなく、Qualcommならではのハードウェアアクセラレーションを活かしやすい点にあります。
+家族向けフィルタリングは、いきなり強い制限を入れるより、子ども用SSIDとDNS方針を分けるところから始めるのがおすすめです。
 
-一般的なOpenWrt機では、CPU側で頑張るソフトウェア処理中心の考え方になりやすいですが、LN6001-JPでは「高速経路へ逃がして処理する」という設計思想がかなり強く入っています。
+LN6001-JPでは、OpenWrtベースの柔軟性を使って、次のような構成を作れます。
 
-そのため、単純な速度ベンチマークだけでなく、「家族同時利用でも崩れにくい」「動画や会議が安定しやすい」という部分が、この機種らしい強みになっています。
+- 子ども用SSID `MyHome_Kids`
+- 子ども用ネットワーク `192.168.30.0/24`
+- kids → wan は許可
+- kids → lan は拒否
+- DHCPでFamily DNSを配布
+- 必要なら夜間だけkids → wanを拒否
+- AdblockやAllowlistで誤ブロックに対応
+- DoH、VPN、モバイル回線の限界も理解する
 
-現実的な進め方は次のとおりです。
+家庭では、「完全に防ぐ」より「ルールを分かりやすくし、必要に応じて戻せる」ことが大事です。
 
-1. 回線実測値を有線で測る
-2. SFE、NSS、ECM、PPE の有無を確認する
-3. Qualcommの加速を前提に、ファームウェア側のQoSや帯域制御を使う
-4. 特に上り方向の混雑を重点的に見る
-5. 負荷時の ping と体感で評価する
+まずは小さく始める。
 
-この機種では、「加速でしっかり速度を出しつつ、混雑時だけ崩れにくく整える」と考えるほうが実運用に合っています。
+子ども用端末、IoT、ゲストWi-Fi、家族共用端末を少しずつ整理していく。
+
+このくらいの距離感が、無理なく続けやすいと思います。
 
 ![まず見るところ](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/009/diagram-03.png)
 
+## 次に読むなら
+
+家族向けフィルタリングを入れたら、次は目的に合わせて進みます。
+
+- [DNS広告ブロックの始め方](https://note.com/ikmsan/n/n4759cf81d0e1)
+- [ゲストWi-Fiの作り方](https://note.com/ikmsan/n/nacbd5d573d67)
+- [VLANで社内・ゲストネットワークを分ける](https://note.com/ikmsan/n/n516c42447850)
+- [firewall zonesの考え方](https://note.com/ikmsan/n/nfe0609ff7bd4)
+- [家庭向け構成例](https://note.com/ikmsan/n/n73a7fed30751)
+
+DNS広告ブロックをまだ入れていない人は、008の記事へ。
+
+子ども用、IoT用、ゲストWi-Fi用のネットワークをもっと分けたい人は、VLANとfirewall zoneの記事へ進むと読みやすいです。
+
+## CLI例の前提
+
+この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。
+
+無線の国設定、送信出力、DFS関連の値は変更しません。
+
+ファームウェア更新で画面名やコマンドの出力が変わることがあります。
+
+記事の内容と実際の画面が少し違う場合は、まずバックアップを取り、Linksys公式サポートの最新情報も確認してください。
+
 ## よくある質問
 
-### LN6001-JPの速さは何が効いている？
+### 子ども用SSIDは作ったほうがいい？
 
-大きいのは、Qualcommのハードウェアアクセラレーションです。
+作ったほうが管理しやすいです。
 
-SFE、NSS、ECM、PPE のような加速スタックが通信を高速経路へ流しやすくするため、家庭内で複数端末が同時利用してもスループットを維持しやすくなります。
+メインSSIDに全部混ぜると、DNS方針や時間ルールを端末ごとに管理する必要があります。
 
-### この機種では何を優先すればいい？
+子ども用SSIDを分ければ、SSID単位でDNS、firewall、時間ルールを考えやすくなります。
 
-まずは Qualcomm のハードウェアアクセラレーションを活かせる状態を維持することです。
+### Family DNSだけで安全になる？
 
-その上で、ファームウェア側のQoSや帯域制御を使い、混雑時の崩れ方を抑えていく方向が現実的です。
+完全にはなりません。
 
-まずは上りの詰まりを抑え、負荷時の ping と会議品質が改善するかを見ると判断しやすいです。
+Family DNSは成人向けコンテンツやマルウェアの一部をDNSで減らす仕組みです。
+
+DoH、VPN、モバイル回線、アプリ内通信、同一ドメイン配信などには効きにくいことがあります。
+
+OSやアカウント側のペアレンタル設定も併用するのがおすすめです。
+
+### AdblockとFamily DNSはどちらを使えばいい？
+
+目的が違います。
+
+広告やトラッキングを減らしたいならAdblock。
+
+子ども用端末で成人向けコンテンツやマルウェアを減らしたいならFamily DNS。
+
+両方使う場合は、Force Local DNSやDHCP Optionsとの衝突に注意し、ネットワークごとに方針を決めます。
+
+### 夜間制限は確実に効く？
+
+多くの通信は止められますが、完全ではありません。
+
+すでに張られている通信がしばらく残ることがあります。
+
+確認時は端末のWi-Fiを切断・再接続したり、アプリを再起動したりして見ます。
+
+### 学校用PCにも適用していい？
+
+慎重に進めてください。
+
+学校管理端末は、VPN、証明書、独自DNS、管理ポリシーを使っている場合があります。
+
+いきなり強いフィルタリングをかけると、授業、認証、教材、提出システムが動かなくなることがあります。
+
+まずはテストし、問題が出たらAllowlistや別SSIDで調整します。
+
+### 子どもがモバイル回線やVPNを使ったらどうなる？
+
+LN6001-JP側の制御は効きにくくなります。
+
+家庭内Wi-Fiを通らない通信や、外部VPNへ入る通信は、ルーター側DNSやfirewallを迂回する場合があります。
+
+そこは技術だけではなく、端末側のペアレンタル設定や家庭内ルールとして考える必要があります。
 
 ## 参考リンク
 
 - Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/
-- Bufferbloat test: https://www.waveform.com/tools/bufferbloat
+- Velop WRT Pro 7 OpenWrt ルーターにAdblockを追加してセットアップする方法: https://support.linksys.com/kb/article/7050-jp/
+- Velop WRT Pro 7 OpenWrt DNS-over-HTTPS（DoH）の設定方法: https://support.linksys.com/kb/article/7047-jp/
+- OpenWrt Wiki - Parental controls: https://openwrt.org/docs/guide-user/firewall/fw3_configurations/fw3_parent_controls
+- OpenWrt Wiki - DHCP and DNS configuration: https://openwrt.org/docs/guide-user/base-system/dhcp
+- OpenWrt Wiki - DHCP and DNS examples: https://openwrt.org/docs/guide-user/base-system/dhcp_configuration
+- Cloudflare 1.1.1.1 for Families: https://developers.cloudflare.com/1.1.1.1/setup/
+- Google Search Help - Lock SafeSearch for devices you manage: https://support.google.com/websearch/answer/186669
 
 ## この連載で使っているOpenWrtルーター
 

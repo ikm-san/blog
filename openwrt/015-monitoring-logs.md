@@ -1,62 +1,334 @@
 <!-- mirror-source: articles/015-monitoring-logs.md -->
 
-# 監視とログ: 小規模オフィスで見るべき最低限の情報【OpenWrt集中連載015】
+# ルーターが止まる前に｜小さなオフィス・店舗で見るべきログと状態確認【OpenWrt集中連載015】
 
-OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
+小さなオフィスや店舗では、ルーターが止まると普通に業務が止まります。
 
-この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。
+レジがつながらない。  
+予約端末が動かない。  
+スタッフ用PCがクラウドへ入れない。  
+ゲストWi-Fiだけ不安定。  
+防犯カメラは見えるのにVPNで店舗へ入れない。  
+スマート決済だけ失敗する。
 
-LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。
+こういう時に一番困るのは、
 
-このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。
+```txt
+何が壊れているのか分からない
+```
 
-## 要約
+ことです。
 
-小規模オフィスや店舗では、ルーターが止まるだけで業務影響が出ることがあります。
+回線なのか。  
+Wi-Fiなのか。  
+DNSなのか。  
+DHCPなのか。  
+ゲストWi-Fiだけなのか。  
+VPNだけなのか。  
+それとも、昨日変えたfirewall設定なのか。
 
-ただし、最初から大規模な監視システムを導入しなくても大丈夫です。
+ここが分からないと、だいたい全部再起動したくなります。
 
-まずは「WANが生きているか」「Wi‑Fi端末が見えているか」「DHCPが配れているか」「直近ログにエラーがないか」を確認できるだけでも、障害時の切り分けはかなり速くなります。
+分かります。
 
-LN6001-JPは、LuCI管理画面とSSHの両方で状態確認できます。
+でも、いきなり全部再起動する前に、まず見たい場所があります。
 
-この記事では、平常時に見ておくべき最低限の情報、障害時にどこから確認すると切り分けしやすいか、まず覚えておきたい確認コマンドを、家庭・小規模オフィス向けに整理します。
+```txt
+WAN / WAN6
+DNS
+DHCP
+Wi-Fi
+直近ログ
+```
+
+この5つです。
+
+最初からSNMP、Grafana、Prometheus、外部監視サービスまで作らなくて大丈夫です。
+
+もちろん、そういう監視は便利です。  
+でも、その前にまず「いつもの状態」を知るほうが大事です。
+
+いつもWANはどう見えているのか。  
+普段のWi-Fi接続台数はどれくらいか。  
+NASやプリンターはどのIPを取っているのか。  
+ログに普段から出ている警告なのか、今日から出たエラーなのか。
+
+監視の第一歩は、グラフを作ることではありません。
+
+**平常時を知ること** です。
+
+LN6001-JPはOpenWrtベースなので、LuCIの管理画面とSSHの両方で状態確認できます。
+
+この記事では、小さなオフィスや店舗でまず見るべき状態、平常時メモ、障害時の切り分け順、サポートへ共有する時の注意点をまとめます。
+
+> この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使いながら、家庭・小さなオフィス・店舗でOpenWrtベースルーターを現実的に使う方法をまとめています。  
+> 連載目次: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](https://note.com/ikmsan/n/ndf7569fea475)
+
+## 今日のゴール
+
+この記事のゴールは、本格監視基盤を作ることではありません。
+
+まずは、ここまでできればOKです。
+
+- LuCIでWAN / WAN6 / Wi-Fi / DHCPを確認できる
+- SSHで `ifstatus wan`、`logread`、`cat /tmp/dhcp.leases` を使える
+- 障害時に「何から見るか」の順番を決められる
+- 平常時の状態スナップショットを残せる
+- ゲストWi-Fi、Device、VPNなど、ネットワークごとに切り分けられる
+- ログを共有する時に、伏せるべき情報が分かる
+- 本格監視へ進む前に、最低限の運用メモを作れる
+
+監視というと大げさに聞こえます。
+
+でも最初は、
+
+```txt
+いつもの状態をメモしておく
+困ったら同じ場所を見る
+```
+
+だけで十分です。
 
 ![よくある悩み](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/diagram-01.png)
 
-## この記事でわかること
+## 先にざっくり結論
 
-- 小規模オフィスや店舗で最低限見ておきたい項目
-- 障害時にどの順番で確認すると切り分けしやすいか
-- LuCIとSSHでまず覚えておきたい確認方法
+小さなオフィスや店舗では、まず次の5つを見られれば十分です。
 
-## こんな人に向いています
+1. **WAN / WAN6 がupか**
+2. **DNS名前解決ができるか**
+3. **DHCPで端末にIPアドレスを配れているか**
+4. **Wi-Fi端末がSSIDへ接続できているか**
+5. **直近ログにerror / fail / warnが大量に出ていないか**
 
-- 小規模オフィスや店舗で、最低限の監視を運用に入れたい
-- 障害時に何から見ればいいか決めておきたい
-- 平常時の状態をざっくり把握しておきたい
+障害時は、いきなりログを全部読もうとしなくて大丈夫です。
+
+まずはこの順番で見ます。
+
+```txt
+全体障害か、1台だけか
+  ↓
+WAN / WAN6
+  ↓
+DNS
+  ↓
+DHCP
+  ↓
+Wi-Fi
+  ↓
+firewall / VLAN / VPN
+  ↓
+直近ログ
+```
+
+ログは大事です。
+
+でも、ログだけを見ても迷子になります。
+
+先に、
+
+```txt
+どこまで生きているか
+```
+
+を見たほうが早いです。
+
+全員ダメならWAN。  
+特定SSIDだけならDHCPかfirewall。  
+特定端末だけなら端末側。  
+VPNだけならVPNとルート承認。  
+ゲストWi-Fiだけならguest network。
+
+こうやって順番を決めておくと、障害時にかなり落ち着けます。
+
+## こういう人向けです
+
+この記事は、次のような人向けです。
+
+- 小さなオフィスや店舗で最低限の監視を始めたい
+- ルーター障害時に何から見ればよいか決めておきたい
+- IPoE、ゲストWi-Fi、VLAN、VPNを入れたあと、状態確認の型を作りたい
+- サポートへ相談する時に、何を伝えればよいか整理したい
+- 高度な監視基盤の前に、LuCIとSSHでできる確認を覚えたい
+- 平常時メモや変更履歴を残して、トラブル対応を速くしたい
+- 店舗スタッフや家族に「まずここを見て」と伝えたい
+
+逆に、すでにZabbix、Prometheus、Grafana、外部死活監視まで組んでいる人には、かなり基本寄りです。
+
+でも、小さな環境ではこの基本が一番効きます。
 
 ![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/diagram-02.png)
 
-## まずはここまでで十分
+## 最初に言葉だけそろえる
 
-高度な監視基盤を最初から入れなくても、まずは次の3つで十分です。
+監視とログで出てくる言葉を、ざっくり整理します。
 
-1. LuCI の Overview を定期的に見る
-2. DHCPリースとWi‑Fi接続端末を確認できるようにする
-3. `logread | tail -n 100` を見られるようにする
+![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-01.png)
 
-平常時の見え方を知っておくだけでも、「いつもと違う」をかなり見つけやすくなります。
+最初は、次だけ覚えれば大丈夫です。
 
-最初は「ログを全部読む」より、「どこを見ると異常を見つけやすいか」を覚えるほうが重要です。
+```txt
+logread = ログを見る
+ifstatus = WANやinterfaceの状態を見る
+dhcp.leases = 端末に配ったIPを見る
+baseline = いつもの状態
+```
 
-監視と言っても、最初からSNMPやGrafanaを入れる必要はありません。
+## 最初に見るべき5項目
 
-まずはLuCIとSSHで「今どう動いているか」を確認できるだけでも十分役立ちます。
+監視と言っても、最初から難しく考えなくて大丈夫です。
+
+まずは次の5項目です。
+
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-02.png)
+
+この5つが見えるだけで、
+
+```txt
+回線側なのか
+DNSなのか
+Wi-Fiなのか
+端末側なのか
+firewallなのか
+```
+
+をかなり絞れます。
+
+## 最初から本格監視を入れなくていい理由
+
+SNMP、Prometheus、Grafana、Zabbix、外部監視サービス。
+
+どれも便利です。
+
+ただ、小さなオフィスや店舗では、最初からそこまで作り込む前に、まず手元で状態確認できることが大事です。
+
+いきなり本格監視から始めると、こうなりがちです。
+
+- 監視対象が多すぎて見なくなる
+- 何が正常値か分からない
+- アラートが多すぎて無視する
+- 監視ツール自体の運用が負担になる
+- 障害時に結局ルーターへSSHして確認する
+- グラフはあるけど、何を直せばいいか分からない
+
+監視ツールは、平常時と異常時の見方が分かってから入れると強いです。
+
+まずはLuCIとSSHで、
+
+```txt
+いつもの状態
+困った時に見る順番
+変更前後の差分
+```
+
+を作ります。
+
+そのあとで、必要になったらリモートsyslog、死活監視、グラフ化へ進むほうが無理がありません。
+
+## LuCIでまず見る画面
+
+## Status → Overview
+
+まず見るのはここです。
+
+LuCIへログインしたら、最初にOverviewを見ます。
+
+ここはルーターの健康診断みたいな画面です。
+
+確認ポイントは次です。
+
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-03.png)
+
+小さなオフィスや店舗で、
+
+```txt
+全員インターネットへ出られない
+```
+
+と言われたら、まずOverviewです。
+
+ここでWAN / WAN6が落ちているなら、Wi-Fiや端末側より先に回線を見ます。
+
+## Network → Interfaces
+
+WAN、WAN6、LAN、guest、device、kidsなどの状態を確認する画面です。
+
+確認ポイントは次です。
+
+![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-04.png)
+
+ゲストWi-Fi、VLAN、VPN、IPoEを入れたあとに通信できない場合は、この画面で対象interfaceがupしているかを見ます。
+
+## Network → Wireless → Associated Stations
+
+Wi-Fi接続中の端末一覧を確認する場所です。
+
+見るポイントは次です。
+
+- 端末がSSIDへ接続できているか
+- どのradioへ接続しているか
+- signalが弱すぎないか
+- TX/RX rateが極端に低くないか
+- 端末が2.4GHz / 5GHz / 6GHzのどこにいるか
+- MLO有効時に複数radioへ見えているか
+
+「Wi-Fiがつながらない」という相談では、まずAssociated Stationsを見ます。
+
+ここに端末が出ていれば、少なくともWi-Fi接続まではできています。
+
+出ていない場合は、SSID、パスワード、暗号化方式、電波強度、端末側の対応帯域を見ます。
+
+## Network → DHCP and DNS → Active DHCP Leases
+
+現在、DHCPでIPアドレスを割り当てている端末一覧です。
+
+見るポイントは次です。
+
+- 端末名
+- MACアドレス
+- IPアドレス
+- リース期限
+- 想定したネットワークのIPアドレスを取っているか
+
+たとえば、ゲストWi-Fi端末が `192.168.1.x` を取っていたら、guestではなくlanへ紐づいている可能性があります。
+
+Deviceネットワークのカメラが `192.168.3.x` を取れているか。  
+Kids端末が `192.168.4.x` を取れているか。  
+NASやプリンターがDHCP予約通りのIPを取っているか。
+
+ここはかなりよく見ます。
+
+## System → System Log
+
+LuCIからログを確認する画面です。
+
+最初はログを全部理解しようとしなくて大丈夫です。
+
+まずは、次の文字が大量に出ていないかを見ます。
+
+```txt
+error
+fail
+warn
+timeout
+disconnect
+restart
+dnsmasq
+netifd
+odhcp6c
+hostapd
+firewall
+```
+
+ログは「答え」ではなく「手がかり」です。
+
+ログだけ見て判断するより、WAN、DNS、DHCP、Wi-Fi、firewallの状態と合わせて見ます。
 
 ## 3分で取る状態スナップショット
 
-障害時に毎回コマンドを思い出すのは大変です。まずは、以下をひとまとまりで保存できるようにしておくと便利です。
+障害時に毎回コマンドを思い出すのは大変です。
+
+まずは、次をひとまとまりで保存できるようにしておくと便利です。
 
 ```sh
 SNAP_DIR="/tmp/ln6001-snapshot-$(date +%Y%m%d-%H%M)"
@@ -67,65 +339,75 @@ ubus call system board > "$SNAP_DIR/system-board.json"
 uptime > "$SNAP_DIR/uptime.txt"
 free > "$SNAP_DIR/free.txt"
 df -h > "$SNAP_DIR/df-h.txt"
+
 ifstatus wan > "$SNAP_DIR/ifstatus-wan.json" 2>/dev/null || true
 ifstatus wan6 > "$SNAP_DIR/ifstatus-wan6.json" 2>/dev/null || true
+
 ip addr show > "$SNAP_DIR/ip-addr.txt"
 ip route show > "$SNAP_DIR/route-v4.txt"
 ip -6 route show > "$SNAP_DIR/route-v6.txt"
+
 cat /tmp/dhcp.leases > "$SNAP_DIR/dhcp-leases.txt"
-wifi status > "$SNAP_DIR/wifi-status.json"
-logread | tail -n 200 > "$SNAP_DIR/logread-tail.txt"
+uci show network > "$SNAP_DIR/network.uci.txt"
+uci show wireless > "$SNAP_DIR/wireless.uci.txt"
+uci show dhcp > "$SNAP_DIR/dhcp.uci.txt"
+uci show firewall > "$SNAP_DIR/firewall.uci.txt"
+
+wifi status > "$SNAP_DIR/wifi-status.json" 2>/dev/null || true
+iw dev > "$SNAP_DIR/iw-dev.txt" 2>/dev/null || true
+
+logread | tail -n 300 > "$SNAP_DIR/logread-tail.txt"
+dmesg | tail -n 100 > "$SNAP_DIR/dmesg-tail.txt"
 
 ls -l "$SNAP_DIR"
 ```
 
-このスナップショットには端末名、MACアドレス、SSID、回線情報が含まれます。サポートへ共有する場合は、必要に応じて伏せ字にします。
+これは復元用バックアップではありません。
 
-## LuCIで確認できる主な情報
+「今どうなっているか」を見るための状態メモです。
 
-### Status > Overview（概要画面）
+障害時にこのスナップショットを取って、平常時のものと見比べると差分が見えます。
 
-最初に見る画面です。LN6001-JPへログイン（`https://192.168.1.1`）すると表示されます。
+## スナップショットに含まれる情報に注意する
 
-障害時も、まずここを見るだけで「WANなのかWi‑Fiなのか」をかなり切り分けしやすくなります。
+このスナップショットには、かなりいろいろな情報が入ります。
 
-確認ポイント:
+たとえば、
 
-![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-01.png)
+- 端末名
+- MACアドレス
+- SSID
+- Wi-Fiパスワード
+- IPアドレス
+- グローバルIPv6アドレス
+- 回線情報
+- VPN関連情報
+- firewall設定
 
-最初は「いつもの状態」を覚えておくことが大事です。
+などです。
 
-例えば、通常時のWi‑Fi接続台数やCPU負荷感を知っておくと、「今日は異常に重い」を見つけやすくなります。
+サポートや詳しい人へ共有する場合は、必要に応じて伏せ字にします。
 
-### Network > Wireless > Associated Stations
+特に、次はそのまま公開しないほうが安全です。
 
-Wi‑Fi接続中の端末一覧とMACアドレス、SSID、信号強度を確認できます。
+- SSID
+- Wi-Fiパスワード
+- MACアドレス
+- グローバルIPv6アドレス
+- DDNS名
+- VPN設定
+- TailscaleやWireGuard関連情報
+- PPPoE ID
+- 固定IP情報
+- 店舗や自宅を特定できるホスト名
 
-「Wi‑Fiがつながらない」という報告があった際に、端末がアソシエート（接続）できているかをここで確認します。
+## SSHで確認する基本コマンド
 
-SSIDへ見えていない場合は、認証や電波側の問題を疑いやすくなります。
+ここからは、SSHで使う基本コマンドです。
 
-### Network > DHCP and DNS > Active DHCP Leases
+最初は読み取りだけで十分です。
 
-現在DHCPでIPアドレスを割り当て中の端末一覧です。
-
-端末名（ホスト名）、MACアドレス、IPアドレス、リース期限が表示されます。
-
-「Wi‑Fiにはつながっているが通信できない」時は、ここでIP取得できているかを見ると切り分けしやすくなります。
-
-### System > System Log
-
-LuCIからのログ確認です。テキスト形式で表示されます。
-
-最初は全部を理解しようとせず、「err」「fail」「warn」が出ていないかを見るくらいでも十分です。
-
-SSHへ入れるようになると、LuCIより細かい状態確認ができます。
-
-ただし、最初は設定変更より「今どう動いているか」を見る用途で使うくらいでも十分です。
-
-## SSHで確認するコマンド
-
-### システム全体の確認
+## システム全体を見る
 
 ```sh
 echo "### system board"
@@ -139,13 +421,20 @@ free
 
 echo "### storage"
 df -h
+
+echo "### processes"
+top -bn1 | head -n 30
 ```
 
-`uptime` と `free` は、まず最初に確認したいコマンドです。
+見るポイントです。
 
-再起動ループやメモリ不足は、小規模オフィス環境でも比較的よく起きる切り分けポイントです。
+![表画像 table-05](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-05.png)
 
-### ネットワーク接続状態
+再起動したつもりがないのにuptimeが短い場合、途中で再起動が起きているかもしれません。
+
+ストレージが詰まっている場合は、パッケージ追加やログ保存で問題が出ることがあります。
+
+## WAN / WAN6を見る
 
 ```sh
 echo "### WAN"
@@ -154,278 +443,876 @@ ifstatus wan
 echo "### WAN6"
 ifstatus wan6
 
-echo "### addresses"
-ip addr show
-
-echo "### routes"
+echo "### IPv4 routes"
 ip route show
+
+echo "### IPv6 routes"
 ip -6 route show
+
+echo "### WAN related logs"
+logread | grep -Ei 'wan|wan6|netifd|dhcp|dhcpv6|odhcp6c|ppp|pppoe|ipoe|map|dslite|ipip' | tail -n 120
 ```
 
-`ifstatus wan` と `ifstatus wan6` は、まず最初に確認したいコマンドです。
+IPoE環境では、IPv6は生きているけれどIPv4 over IPv6側だけおかしい、ということがあります。
 
-特にIPoE環境では、「IPv6だけ生きている」「IPv4 over IPv6側だけ落ちている」ケースもあります。
+そのため、`wan` と `wan6` は分けて見ます。
 
-### DHCPリース確認
+ここを混ぜると、
+
+```txt
+IPv6は生きているのに、IPv4だけ死んでいる
+```
+
+状態を見落としやすくなります。
+
+## DNSを見る
 
 ```sh
-echo "### DHCP leases"
+echo "### DNS test"
+nslookup www.google.co.jp
+
+echo "### IPv4 ping"
+ping -c 4 8.8.8.8
+
+echo "### hostname ping"
+ping -c 4 google.co.jp
+
+echo "### resolver files"
+cat /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null || true
+cat /etc/resolv.conf
+
+echo "### dnsmasq logs"
+logread | grep -i dnsmasq | tail -n 80
+```
+
+切り分けの見方です。
+
+![表画像 table-06](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-06.png)
+
+Adblock、Family DNS、Tailscale、WireGuard、DoH対策を入れている場合は、DNS経路が複雑になりやすいです。
+
+まずは端末がどのDNSを使っているかを確認します。
+
+## DHCPを見る
+
+```sh
+echo "### active leases"
 cat /tmp/dhcp.leases
 
-echo "### DHCP config"
-uci show dhcp
+echo "### DHCP config summary"
+uci show dhcp | grep -E 'interface|start|limit|leasetime|dhcp_option|dns|@host|\\.mac|\\.ip|\\.name'
+
+echo "### dnsmasq logs"
+logread | grep -i dnsmasq | tail -n 80
 ```
 
-`cat /tmp/dhcp.leases` は、「その端末が本当にIP取得できているか」を見る時にかなり便利です。
+見るポイントです。
 
-### Wi‑Fi状態確認
+- 端末がIPアドレスを取得しているか
+- 想定したネットワークのIP範囲にいるか
+- Static Leaseが重複していないか
+- DHCP範囲と予約IP範囲が重なっていないか
+- dnsmasqが再起動ループしていないか
+
+Wi-Fiにはつながっているのに通信できない時は、DHCPを必ず見ます。
+
+端末が `169.254.x.x` のような自己割り当てIPになっている場合は、DHCPからIPを取れていません。
+
+## Wi-Fiを見る
 
 ```sh
-echo "### Wi-Fi status"
+echo "### wireless config summary"
+uci show wireless | grep -E 'wifi-device|wifi-iface|ssid|encryption|network|disabled'
+
+echo "### wifi status"
 wifi status
 
 echo "### wireless interfaces"
 iw dev
 
+echo "### associated stations"
+for ifc in $(iw dev | awk '$1 == "Interface" {print $2}'); do
+  echo "### $ifc"
+  iw dev "$ifc" station dump | grep -E 'Station|signal:|tx bitrate:|rx bitrate:|connected time:' || true
+done
+
 echo "### wireless logs"
-logread | grep -Ei 'wireless|wifi|wlan|hostapd' | tail -n 80
+logread | grep -Ei 'wireless|wifi|wlan|hostapd|dfs|radar' | tail -n 120
 ```
 
-Wi‑Fi問題では、「端末がSSIDへ見えているか」と「IP取得できているか」を分けて確認すると切り分けしやすくなります。
+見るポイントです。
 
-### システムログの確認
+- SSIDが有効か
+- SSIDが正しいnetworkへ紐づいているか
+- 端末がradioへ接続しているか
+- signalが極端に弱くないか
+- 2.4GHz / 5GHz / 6GHzのどれへつながっているか
+- DFSやradio再起動が起きていないか
+
+この連載では、無線の国設定、送信出力、DFS関連の値は変更しません。
+
+ログを見るのは状態確認のためです。
+
+## firewallを見る
 
 ```sh
-# 直近100行のログ
-logread | tail -n 100
+echo "### firewall config"
+uci show firewall
 
-# DNS/DHCPに関するログ（dnsmasq）
-logread | grep -i dnsmasq | tail -n 50
+echo "### firewall zones and forwarding"
+uci show firewall | grep -E 'zone|forwarding|name|network|src|dest|target|input|output|forward'
 
-# ファイアウォール関連のログ
-logread | grep -i 'DROP\|REJECT\|firewall' | tail -n 50
+echo "### iptables rules"
+iptables-save 2>/dev/null | head -n 160 || true
 
-# WAN/ネットワーク関連のログ
-logread | grep -i 'wan\|pppoe\|ipoe\|ipip' | tail -n 30
+echo "### ip6tables rules"
+ip6tables-save 2>/dev/null | head -n 160 || true
 
-# エラーや警告のログ
-logread | grep -i 'err\|warn\|fail' | tail -n 50
-
-# 特定時刻以降のログ（例: 午後2時以降）
-logread | grep '14:' | tail -n 50
+echo "### firewall logs"
+logread | grep -Ei 'firewall|DROP|REJECT' | tail -n 100
 ```
 
-最初は「エラーが大量に出ていないか」を見るくらいでも十分です。
+firewallは、ゲストWi-Fi、VLAN、VPNを触ったあとに重要になります。
 
-特定時刻で grep すると、「その時だけ何が起きたか」をかなり追いやすくなります。
+よくある確認ポイントは次です。
 
-### パッケージとリソース
+- guest → wan が許可されているか
+- guest → lan を許可していないか
+- guest / device / kids のInputを `REJECT` にした場合、DHCP/DNSを許可しているか
+- VPNからlanへ広く許可しすぎていないか
+- deviceからlanへ勝手に入れる構成になっていないか
+
+## VPNを見る
+
+WireGuardやTailscaleを使っている場合は、VPNも確認します。
+
+### WireGuard
 
 ```sh
-# インストール済みパッケージ
-opkg list-installed
+echo "### WireGuard"
+wg show 2>/dev/null || echo "wg command is not available"
 
-# プロセス一覧（重いプロセスを確認）
-top
+echo "### WG interfaces"
+ip addr show | grep -A5 -Ei 'wg|wireguard' || true
 
-# カーネルメッセージ
-dmesg | tail -n 50
+echo "### WG firewall hints"
+uci show firewall | grep -Ei 'wireguard|wg|51820|vpn' || true
+
+echo "### WG logs"
+logread | grep -Ei 'wireguard|wg|51820' | tail -n 100
 ```
 
-`top` は、「CPUが急に重くなっていないか」を確認する時に便利です。
+見るポイントです。
 
-SQMやAdblock、VPNなどを複数有効化している場合は、負荷確認で役立つことがあります。
+- latest handshakeが更新されているか
+- peerが見えているか
+- firewallでUDPポートが許可されているか
+- AllowedIPsの範囲が広すぎないか
 
-障害対応では、「どこから壊れているか」を順番に切り分けることが重要です。
+### Tailscale
 
-最初から全部を見るより、「WAN → DNS → DHCP → Wi‑Fi」のように順番を固定したほうが整理しやすくなります。
+```sh
+echo "### Tailscale status"
+tailscale status 2>/dev/null || echo "tailscale command is not available"
+
+echo "### Tailscale IP"
+tailscale ip 2>/dev/null || true
+
+echo "### Tailscale prefs"
+tailscale debug prefs 2>/dev/null | grep -Ei 'AdvertiseRoutes|ExitNode|Route' || true
+
+echo "### Tailscale logs"
+logread | grep -Ei 'tailscale|tailscaled' | tail -n 100
+```
+
+見るポイントです。
+
+- LN6001-JPがTailnetに参加しているか
+- サブネットルートを広告しているか
+- Tailscale管理コンソールでルート承認済みか
+- Exit Nodeを意図せず有効にしていないか
 
 ## 障害時の切り分け手順
 
-「インターネットにつながらない」という報告があった場合の確認順序:
+## ステップ1: 全体障害か、1台だけかを分ける
 
-### ステップ1: 全体かどうかを確認
+最初に、影響範囲を見ます。
 
-- 有線でも起きているか確認（有線端末をルーターのLANポートに直接接続してテスト）
-- 複数の端末で起きているか確認
+![表画像 table-07](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-07.png)
 
-最初に「1台だけの問題なのか」「全体障害なのか」を分けるだけでも、かなり方向性が変わります。
+ここを最初に分けるだけで、かなり楽になります。
 
-### ステップ2: WANの状態を確認
+全体障害なのに端末設定を見ても遠回りです。  
+1台だけの問題なのにWANを疑っても遠回りです。
+
+まず影響範囲です。
+
+## ステップ2: WAN / WAN6を確認する
 
 ```sh
-# WANの接続状態
-ifstatus wan | grep -E '"up"|"ipaddr"|"error"'
-ifstatus wan6 | grep -E '"up"|"ip6addr"'
+ifstatus wan | grep -E '"up"|"ipaddr"|"error"|"pending"'
+ifstatus wan6 | grep -E '"up"|"ip6addr"|"error"|"pending"'
+ip route show default
+ip -6 route show default
 ```
 
-LuCIでは **Status** → **Overview** でWAN/WAN6のステータスを確認します。
+WAN / WAN6が落ちている場合は、LANやWi-Fiより先に回線側を見ます。
 
-WAN/WAN6が落ちている場合は、LANやWi‑Fiを見る前に回線側を疑ったほうが切り分けしやすくなります。
+- ONU / HGWの電源
+- WANケーブル
+- IPoE / PPPoE設定
+- オートIPoEモジュール
+- 上流ルーター
+- プロバイダ障害
 
-### ステップ3: DNSを確認
+IPoE環境では、`wan6` はupでも、IPv4 over IPv6側だけおかしいことがあります。
+
+IPv4とIPv6は分けて見ます。
+
+## ステップ3: DNSを確認する
 
 ```sh
-# DNS解決テスト
+ping -c 4 8.8.8.8
+ping -c 4 google.co.jp
 nslookup www.google.co.jp
-# または
-ping -c 3 8.8.8.8      # IPアドレスへのpingが通ればネット接続自体は問題ない
-ping -c 3 google.co.jp  # これが失敗するならDNSの問題
+logread | grep -i dnsmasq | tail -n 80
 ```
 
-「IPアドレスへのpingは通るが名前解決だけ失敗する」場合は、DNS問題の可能性が高くなります。
+判断の目安です。
 
-### ステップ4: DHCPを確認
+```txt
+8.8.8.8へのping OK
+google.co.jpへのping NG
+→ DNS問題の可能性
+
+8.8.8.8へのping NG
+google.co.jpへのping NG
+→ WAN、経路、firewall、回線側の可能性
+```
+
+AdblockやFamily DNSを入れている場合は、一時停止して切り分けることもあります。
 
 ```sh
-# 端末がIPアドレスを取得しているか
+/etc/init.d/adblock stop 2>/dev/null || true
+/etc/init.d/dnsmasq restart
+```
+
+確認後、必要なら戻します。
+
+```sh
+/etc/init.d/adblock start 2>/dev/null || true
+/etc/init.d/adblock reload 2>/dev/null || true
+```
+
+## ステップ4: DHCPを確認する
+
+```sh
 cat /tmp/dhcp.leases
-
-# dnsmasqのログを確認
-logread | grep -i dnsmasq | tail -n 30
+logread | grep -i dnsmasq | tail -n 80
+uci show dhcp | grep -E 'interface|start|limit|@host|dhcp_option'
 ```
 
-Wi‑Fiへ接続できていても、DHCPでIP取得できていなければ通信できません。
+確認することです。
 
-### ステップ5: ファイアウォールを確認
+- 対象端末がリース一覧にいるか
+- 想定したIP範囲を取っているか
+- `169.254.x.x` のような自己割り当てになっていないか
+- DHCP予約が重複していないか
+- DHCPサーバーが対象interfaceで有効か
 
-最近firewallの設定を変更した場合:
+Wi-Fi接続はできているのにIPアドレスが取れない場合は、DHCPやfirewallのInput設定を見ます。
+
+## ステップ5: Wi-Fiを確認する
 
 ```sh
-uci show firewall
-logread | grep -i 'DROP\|REJECT' | tail -n 30
+wifi status
+iw dev
+logread | grep -Ei 'wireless|wifi|wlan|hostapd|dfs|radar' | tail -n 120
 ```
 
-Guest Wi‑FiやVLANを追加した直後は、firewall設定ミスで通信を止めているケースもあります。
+確認することです。
 
-### ステップ6: ログでエラーを確認
+- 対象SSIDが有効か
+- 対象端末がAssociated Stationsにいるか
+- 2.4GHz / 5GHz / 6GHzのどれが不安定か
+- 暗号化方式を変えた直後ではないか
+- MLO設定を有効化してから不安定になっていないか
+
+特定端末だけつながらない場合は、端末側のWi-Fi設定削除・再接続も試します。
+
+## ステップ6: firewall / VLAN / VPNを確認する
+
+設定変更直後に通信できなくなった場合は、firewallやVLANが原因のことがあります。
 
 ```sh
-logread | grep -i 'err\|fail' | tail -n 50
+uci show firewall | grep -E 'zone|forwarding|guest|device|kids|vpn|wireguard|tailscale'
+uci show network | grep -E 'interface|device|bridge|vlan|ports'
+uci show wireless | grep -E 'ssid|network'
 ```
 
-まずは「fail」「error」「warn」が大量に出ていないかを見るだけでも十分役立ちます。
+よくある失敗です。
+
+- ゲストWi-FiのSSIDが `guest` ではなく `lan` に紐づいている
+- guest zoneのInputを `REJECT` にしたが、DHCP/DNSを許可していない
+- DeviceからWANへ出る必要があるのにforwardingがない
+- VLAN変更で管理端末が別ネットワークへ飛ばされた
+- VPNからLANへ届くルールがない
+- VPNからLANへ広く入りすぎている
+
+設定変更直後のトラブルは、直前に触った場所を疑います。
+
+これはかなり効きます。
+
+## ステップ7: 直近ログを見る
+
+```sh
+logread | tail -n 150
+logread | grep -Ei 'err|warn|fail|timeout|restart|disconnect' | tail -n 100
+```
+
+ログは最後にまとめて見るより、ここまでの切り分け結果と合わせて見ます。
+
+DNSが怪しいならdnsmasqログ。  
+WANが怪しいならnetifdやodhcp6c。  
+Wi-Fiが怪しいならhostapdやwireless関連。
+
+ログを全部読むのではなく、疑っている場所に関係するログを見ると楽です。
 
 ## 平常時スナップショットを残す
 
-障害時に「いつもと違う」を判断できるよう、平常時の状態をメモしておきます。
+障害時に比較できるよう、平常時の状態を残しておきます。
 
-小規模オフィスでは、この“平常時メモ”がかなり役立ちます。
+小さなオフィスや店舗では、この平常時メモがかなり効きます。
 
-### 記録しておくべき項目
+## 記録しておく項目
+
+最低限、次を残します。
+
+```txt
+製品:
+  Linksys Velop WRT Pro 7 / LN6001-JP
+
+ファームウェア:
+  1.2.0.15
+
+LAN IP:
+  192.168.1.1
+
+回線:
+  IPoE / PPPoE / HGW配下 / ONU直下
+
+IPv4 over IPv6:
+  OCNバーチャルコネクト / transix / v6プラス / クロスパス / 不明
+
+主要ネットワーク:
+  lan: 192.168.1.0/24
+  guest: 192.168.2.0/24
+  device: 192.168.3.0/24
+
+主要機器:
+  NAS: 192.168.1.10
+  プリンター: 192.168.1.20
+  録画機: 192.168.3.20
+
+通常のWi-Fi接続台数:
+  平日昼: 約15台
+  営業終了後: 約5台
+
+VPN:
+  Tailscale / WireGuard / 未使用
+
+最終バックアップ:
+  backup-LN6001-initial-20260621.tar.gz
+```
+
+この程度でも、障害時の比較にはかなり使えます。
+
+## 平常時コマンド
+
+平常時に次の出力を保存しておくと便利です。
 
 ```sh
-# 以下の出力結果をテキストファイルに保存する
-ubus call system board       # ファームウェアバージョン確認
-uptime                       # 稼働時間
-ifstatus wan                 # WANの状態
-ifstatus wan6                # WAN6の状態
-ip addr show                 # IPアドレス一覧
-cat /tmp/dhcp.leases         # 主要機器のIPアドレス
+BASE_DIR="/root/baseline-$(date +%Y%m%d-%H%M)"
+mkdir -p "$BASE_DIR"
+
+date > "$BASE_DIR/date.txt"
+ubus call system board > "$BASE_DIR/system-board.json"
+uptime > "$BASE_DIR/uptime.txt"
+ifstatus wan > "$BASE_DIR/ifstatus-wan.json" 2>/dev/null || true
+ifstatus wan6 > "$BASE_DIR/ifstatus-wan6.json" 2>/dev/null || true
+ip addr show > "$BASE_DIR/ip-addr.txt"
+ip route show > "$BASE_DIR/route-v4.txt"
+ip -6 route show > "$BASE_DIR/route-v6.txt"
+cat /tmp/dhcp.leases > "$BASE_DIR/dhcp-leases.txt"
+uci show network > "$BASE_DIR/network.uci.txt"
+uci show wireless > "$BASE_DIR/wireless.uci.txt"
+uci show dhcp > "$BASE_DIR/dhcp.uci.txt"
+uci show firewall > "$BASE_DIR/firewall.uci.txt"
+logread | tail -n 300 > "$BASE_DIR/logread-tail.txt"
+
+ls -l "$BASE_DIR"
 ```
 
-最初は全部を記録しなくても、「WAN状態」「主要機器IP」「通常の接続台数」くらいを残すだけでも十分です。
+これは復元用バックアップではなく、比較用の状態メモです。
 
-### 平常時メモの例
-
-```
-
-## LN6001-JP 平常時メモ（作成: 2026-05-07）
-- ファームウェア: 1.2.0.15
-- LAN IP: 192.168.1.1
-- WANプロトコル: IPoE（OCNバーチャルコネクト / MAP-E）
-- WAN IPv6: 2404:xxxx:xxxx:xxx::/56（DHCPv6-PD）
-- 主要機器:
-  - NAS: 192.168.1.10（DHCP予約）
-  - プリンター: 192.168.1.20（DHCP予約）
-  - カメラ: 192.168.1.31（DHCP予約）
-- SSID: MyHome（5GHz/6GHz）、MyHome_2G（2.4GHz）、MyHome_Guest（ゲスト）
-- 通常のWi-Fi接続台数: 約10〜15台
-```
-
-Markdownやテキストファイルで残しておくだけでも、障害時の比較がかなり楽になります。
+復元用バックアップは、LuCIの **System** → **Backup / Flash Firmware** → **Generate archive** からPCへ保存します。
 
 ## 変更履歴を残す
 
-設定変更後に問題が起きた場合、変更履歴があると原因をかなり絞りやすくなります。
+障害対応でかなり効くのが、変更履歴です。
 
-![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-02.png)
+設定変更後に問題が起きた場合、「最後に何を変えたか」が分かれば原因を絞りやすくなります。
+
+![表画像 table-08](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-08.png)
+
+設定変更前に、軽い控えを残します。
 
 ```sh
-BACKUP_DIR="/root/change-before-$(date +%Y%m%d-%H%M)"
-mkdir -p "$BACKUP_DIR"
+CHANGE_DIR="/root/change-before-$(date +%Y%m%d-%H%M)"
+mkdir -p "$CHANGE_DIR"
 
 for cfg in network wireless firewall dhcp system; do
-  cp "/etc/config/$cfg" "$BACKUP_DIR/$cfg"
-  uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
+  cp "/etc/config/$cfg" "$CHANGE_DIR/$cfg"
+  uci show "$cfg" > "$CHANGE_DIR/$cfg.uci.txt"
 done
 
-ls -l "$BACKUP_DIR"
+opkg list-installed > "$CHANGE_DIR/opkg-list-installed.txt"
+logread | tail -n 200 > "$CHANGE_DIR/logread-tail.txt"
+
+ls -l "$CHANGE_DIR"
 ```
 
-最初は「何を変更したか」を1行だけ残す程度でも十分役立ちます。
+最初は、Markdownに1行だけでも十分です。
 
-特にGuest Wi‑Fi、VLAN、SQM、VPN設定は、あとから影響範囲を追いやすくなります。
+```txt
+2026-06-21 14:30 Guest Wi-Fi追加。guest=192.168.2.0/24。変更前バックアップあり。
+```
+
+障害時に「昨日何か変えたっけ？」となるのは、かなりよくあります。
+
+変更履歴は、未来の自分へのメモです。
+
+## ログ共有時に伏せる情報
+
+トラブル時に、詳しい人やサポートへログを送ることがあります。
+
+ただし、ログや設定には個人情報やネットワーク情報が含まれます。
+
+共有前に伏せたいものです。
+
+![表画像 table-09](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-09.png)
+
+伏せ字にする例です。
+
+```txt
+SSID: Office_Staff
+→ SSID: <STAFF_SSID>
+
+MAC: aa:bb:cc:dd:ee:ff
+→ MAC: aa:bb:xx:xx:xx:ff
+
+IPv6: 2404:xxxx:xxxx:xxxx::1
+→ IPv6: 2404:xxxx:xxxx:****::1
+
+PPPoE ID: user@example.ne.jp
+→ PPPoE ID: <PPPOE_ID>
+```
+
+ログを共有する前に、いったんテキストエディタで検索して伏せるのがおすすめです。
+
+## 日常点検の頻度
+
+小さなオフィスや店舗では、毎日ログを全部読む必要はありません。
+
+次くらいの運用で十分です。
+
+![表画像 table-10](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/table-10.png)
+
+ポイントは、「異常が出た時だけ見る」のではなく、「正常時を少し知っておく」ことです。
+
+いつもの接続台数。  
+いつものWAN状態。  
+いつものログの雰囲気。  
+いつものIPアドレス。
+
+この“いつも”があると、異常が見えます。
+
+## もう一歩進んだ監視
+
+LuCIとSSHで状態確認できるようになったら、必要に応じて次へ進みます。
+
+## リモートsyslog
+
+OpenWrtのログは、基本的にはルーター内で確認します。
+
+障害発生後に再起動してしまうと、過去ログが十分に残っていない場合があります。
+
+小さなオフィスや店舗でログを残したい場合は、リモートsyslogを検討します。
+
+ただし、最初から必須ではありません。
+
+まずはLuCIとSSHでログを見られるようにする。
+
+その後に、
+
+```txt
+再起動前のログも残したい
+```
+
+と感じたら導入を検討します。
+
+## 死活監視
+
+外部サービスや別拠点から、次のような監視を行う方法もあります。
+
+- インターネット疎通
+- VPN疎通
+- NASやカメラの応答
+- DNS名前解決
+- 店舗の回線停止検知
+
+ただし、監視対象を増やしすぎると運用が大変です。
+
+まずは、業務影響の大きいものから始めます。
+
+例:
+
+```txt
+店舗:
+  - インターネット疎通
+  - POS / 予約端末の疎通
+  - VPN疎通
+  - 録画機の疎通
+
+家庭:
+  - NAS
+  - インターネット
+  - VPN
+```
+
+## SNMPやGrafanaは後でいい
+
+SNMP、Prometheus、Grafana、Zabbixなどは便利です。
+
+ただし、LN6001-JP側へパッケージを追加して監視を作り込む場合は、ストレージ、メモリ、CPU負荷、運用負荷も考える必要があります。
+
+最初は次で十分です。
+
+- LuCI Overviewを見る
+- `logread` を見る
+- 平常時スナップショットを残す
+- 設定変更履歴を残す
+- 重要機器のIPアドレスをDHCP予約する
+
+本格監視は、そのあとで必要になったら検討します。
 
 ## サポートへ伝える情報
 
-トラブル時は、「今どうなっているか」を整理して伝えるだけでも、かなりサポートを受けやすくなります。
+Linksysサポートや詳しい人に相談する時は、次を整理すると話が早くなります。
 
-トラブル時にLinksysサポートや詳しい人に相談する際に必要な情報:
+```txt
+製品:
+  Linksys Velop WRT Pro 7 / LN6001-JP
 
-- 製品名: Linksys Velop WRT Pro 7 (LN6001-JP)
-- ファームウェアバージョン（System > Software または `ubus call system board`）
-- 回線事業者・プロバイダ・IPoE/PPPoE方式
-- HGW（ひかり電話ゲートウェイ）の有無
-- 問題が始まった時刻・直前の設定変更
-- 有線でも起きているか、Wi-Fiだけか
-- `logread | tail -n 100` の出力
+ファームウェア:
+  1.2.0.15
+
+回線:
+  NTT / auひかり / NURO / J:COM / その他
+
+プロバイダ:
+  OCN / IIJ / BIGLOBE / その他
+
+接続方式:
+  IPoE / PPPoE / HGW配下 / ONU直下 / 不明
+
+問題:
+  全端末でインターネット不可
+  Wi-Fiだけ不可
+  ゲストWi-Fiだけ不可
+  VPNだけ不可
+  特定端末だけ不可
+
+発生時刻:
+  2026-06-21 14:30頃
+
+直前の変更:
+  ゲストWi-Fi追加
+  Adblock導入
+  VPN Assistant導入
+  ファームウェア更新
+  変更なし
+
+確認済み:
+  有線でも発生 / Wi-Fiだけ
+  ifstatus wan
+  ifstatus wan6
+  logread tail
+```
+
+ログや設定を送る場合は、前述の伏せ字を忘れないようにしてください。
+
+## よくある問題と見る場所
+
+## 全端末でインターネットにつながらない
+
+まずWAN/WAN6を見ます。
+
+```sh
+ifstatus wan
+ifstatus wan6
+ip route show default
+ip -6 route show default
+logread | grep -Ei 'wan|wan6|netifd|ppp|ipoe|odhcp6c' | tail -n 120
+```
+
+確認することです。
+
+- ONU / HGWが生きているか
+- WANケーブルが抜けていないか
+- IPoE / PPPoE設定が変わっていないか
+- WAN/WAN6がupか
+- default routeがあるか
+
+全端末でダメなら、まず回線側です。
+
+Wi-Fi設定を触る前に、WANを見ます。
+
+## Wi-Fiだけつながらない
+
+```sh
+wifi status
+iw dev
+logread | grep -Ei 'wireless|wifi|wlan|hostapd|dfs|radar' | tail -n 120
+```
+
+確認することです。
+
+- SSIDが有効か
+- 端末がAssociated Stationsに出ているか
+- 2.4GHz / 5GHz / 6GHzのどれが不安定か
+- 暗号化方式を変えた直後ではないか
+- MLO設定を変えた直後ではないか
+
+有線はOKでWi-Fiだけダメなら、回線よりWi-Fiを見ます。
+
+## ゲストWi-Fiだけつながらない
+
+```sh
+ifstatus guest
+uci show wireless | grep -E 'guest|ssid|network'
+uci show dhcp.guest
+uci show firewall | grep -E 'guest|Allow-Guest|forwarding'
+logread | grep -i dnsmasq | tail -n 80
+```
+
+確認することです。
+
+- ゲストSSIDが `guest` networkに紐づいているか
+- DHCP Serverが有効か
+- `Allow-Guest-DHCP` があるか
+- `Allow-Guest-DNS` があるか
+- guest → wan forwardingがあるか
+- guest → lanを許可していないか
+
+ゲストWi-Fiは、SSIDだけ作っても完成しません。
+
+network、DHCP、firewall zoneまで見ます。
+
+## カメラやIoTだけ不安定
+
+```sh
+ifstatus device 2>/dev/null || true
+cat /tmp/dhcp.leases
+uci show wireless | grep -E 'device|iot|ssid|network'
+logread | grep -Ei 'dnsmasq|wireless|hostapd|device|iot' | tail -n 120
+```
+
+確認することです。
+
+- Device / IoTネットワークでIPを取れているか
+- 2.4GHzに接続しているか
+- DNS広告ブロックが強すぎないか
+- WANへ出る必要がある機器なのにdevice → wanを閉じていないか
+- アプリ初期設定時だけ同じLANが必要ではないか
+
+IoT機器は、クラウド接続やアプリの探索が絡むことがあります。
+
+最初から強く閉じすぎると、動いているようで動いていない状態になりがちです。
+
+## VPNだけつながらない
+
+WireGuardなら次を見ます。
+
+```sh
+wg show 2>/dev/null || true
+uci show firewall | grep -Ei 'wireguard|wg|51820|vpn'
+logread | grep -Ei 'wireguard|wg|51820' | tail -n 120
+```
+
+Tailscaleなら次を見ます。
+
+```sh
+tailscale status 2>/dev/null || true
+tailscale ip 2>/dev/null || true
+tailscale debug prefs 2>/dev/null | grep -Ei 'AdvertiseRoutes|ExitNode|Route' || true
+logread | grep -Ei 'tailscale|tailscaled' | tail -n 120
+```
+
+確認することです。
+
+- VPNサービスが起動しているか
+- 外からポートが届いているか
+- Tailscale管理コンソールでサブネットルートが承認されているか
+- VPNからLANへのfirewallルールがあるか
+- AllowedIPsやサブネットルートが正しいか
+
+VPNは「接続できた」だけでは不十分です。
+
+接続後に、どこへ入れるのかまで確認します。
+
+## DNS広告ブロック後に一部サイトが壊れた
+
+```sh
+/etc/init.d/adblock status 2>/dev/null || true
+logread | grep -Ei 'adblock|dnsmasq' | tail -n 120
+```
+
+一時的にAdblockを止めて確認します。
+
+```sh
+/etc/init.d/adblock stop 2>/dev/null || true
+/etc/init.d/dnsmasq restart
+```
+
+問題が解消するなら、Adblockやブロックリストが原因の可能性があります。
+
+必要なドメインをAllowlistへ追加するか、ブロックリストを減らします。
+
+確認後、必要なら戻します。
+
+```sh
+/etc/init.d/adblock start 2>/dev/null || true
+/etc/init.d/adblock reload 2>/dev/null || true
+```
 
 ## まとめ
 
-最初の成功条件としては、次の3つが見えれば十分です。最初はここまで把握できれば大きく外していません。
+小さなオフィスや店舗では、最初から本格監視を作る必要はありません。
 
-- WAN、Wi-Fi、DHCP の平常時の状態が把握できている
-- 障害時にまず見る画面とコマンドが決まっている
-- 設定変更前後の記録を簡単に残せている
+まずは、次の状態を見られるようにします。
 
-最初から高度な監視基盤を入れなくても、「平常時を知っている」だけで障害対応はかなり速くなります。
+- WAN / WAN6
+- DNS
+- DHCP
+- Wi-Fi
+- firewall zone
+- VPN
+- 直近ログ
 
-特に小規模オフィスでは、「どこを見るか」を決めておくだけでも運用負荷をかなり減らせます。
+障害時は、この順番で切り分けます。
 
-日常的なルーター監視のポイント:
+```txt
+全体障害か1台だけか
+→ WAN / WAN6
+→ DNS
+→ DHCP
+→ Wi-Fi
+→ firewall / VLAN / VPN
+→ ログ
+```
 
-1. **LuCI Status > Overview** でWAN・Wi-Fi・メモリ状態を定期確認
-2. `logread | tail -n 100` で直近ログにエラーがないか確認
-3. 平常時の状態（WAN IP・主要機器IP・接続台数）をメモとして残す
-4. 設定変更前は必ずバックアップを取り、変更履歴を記録する
-5. 障害時はWAN → DNS → DHCP → firewall の順で切り分ける
+監視の第一歩は、平常時を知ることです。
+
+いつものWAN状態。  
+いつものWi-Fi接続台数。  
+主要機器のIPアドレス。  
+最後に変更した設定。  
+直近のバックアップ。
+
+これがあるだけで、障害時の対応はかなり速くなります。
+
+LN6001-JPはLuCIとSSHの両方で状態を確認できます。
+
+最初はログを全部読む必要はありません。
+
+見る場所と順番を決めておく。
+
+それだけで、小さなオフィスや店舗のネットワーク運用はかなり落ち着きます。
 
 ![まず見るところ](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/015/diagram-03.png)
 
+## 次に読むなら
+
+監視とログの基本を押さえたら、次は目的に合わせて進みます。
+
+- [つながらない時の切り分け](https://note.com/ikmsan/n/n1ab2d47c6d10)
+- [設定バックアップと復元](https://note.com/ikmsan/n/n3c25190a8e94)
+- [ファームウェア更新運用](https://note.com/ikmsan/n/nff6b598da354)
+- [firewall zonesの考え方](https://note.com/ikmsan/n/nfe0609ff7bd4)
+- [固定IPとDHCP予約](https://note.com/ikmsan/n/ndd5ae853f033)
+
+障害対応の流れをさらに整理したい人は、つながらない時の切り分けへ。
+
+設定変更前後の戻し方を固めたい人は、設定バックアップと復元の記事へ進むと読みやすいです。
+
+## CLI例の前提
+
+この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。
+
+LuCIの画面名、ログ出力、`ifstatus`、`wifi status`、`iptables-save`、`ip6tables-save`、Tailscale / WireGuard関連の出力は、ファームウェアや追加モジュールの更新で変わることがあります。
+
+記事の内容と実際の画面や出力が違う場合は、まずバックアップを取り、Linksys公式サポートやOpenWrtの最新ドキュメントも確認してください。
+
+無線の国設定、送信出力、DFS関連の値は変更しません。
+
 ## よくある質問
 
-### ルーター監視は何から見ればいい？
+### 小さなオフィスで最初に監視すべきものは？
 
-まずは LuCI の Status > Overview で WAN、Wi‑Fi、メモリ状態を見るだけでも十分です。
+まずはWAN/WAN6、DNS、DHCP、Wi-Fi、直近ログです。
 
-そこから必要に応じてSSHでログ確認へ進むと分かりやすくなります。
+これだけで、回線側なのか、DNSなのか、Wi-Fiなのか、端末側なのかをかなり切り分けられます。
 
 ### 毎日ログを全部見る必要はある？
 
-そこまでは不要です。
+ありません。
 
-平常時の状態を把握しておき、障害時に `logread | tail -n 100` で直近ログを見るだけでもかなり役立ちます。
+普段はLuCIのOverviewでWAN、Wi-Fi、メモリ、接続台数を見るくらいで十分です。
 
-### 小規模オフィスで最低限残すべきメモは？
+障害時に `logread | tail -n 100` や関連ログを見られるようにしておくことが大事です。
 
-WAN IP、主要機器の固定IP、接続台数の目安、最後に設定変更した内容を残しておくと切り分けが速くなります。
+### 障害時は何から見ればいい？
 
-特に「最後に何を変えたか」が分かるだけでも、原因特定しやすくなります。
+まず全体障害か1台だけかを分けます。
+
+その後、WAN/WAN6、DNS、DHCP、Wi-Fi、firewall、ログの順で見ると切り分けしやすくなります。
+
+### 平常時メモには何を残せばいい？
+
+LAN IP、回線方式、WAN/WAN6の状態、主要機器のIPアドレス、SSID、通常の接続台数、VPNの有無、最後のバックアップ名を残しておくと役立ちます。
+
+### logreadの出力をそのまま共有していい？
+
+そのまま共有しないほうが安全です。
+
+SSID、MACアドレス、グローバルIPv6アドレス、DDNS名、VPN情報、PPPoE ID、店舗名や自宅名が分かるホスト名などを伏せてから共有してください。
+
+### 本格監視はいつ入れるべき？
+
+LuCIとSSHで平常時と障害時の確認ができるようになってからで十分です。
+
+そのうえで、再起動前のログを残したいならリモートsyslog、複数拠点を見たいなら外部監視、グラフ化したいならSNMPやGrafanaを検討します。
 
 ## 参考リンク
 
 - Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/
+- Velop WRT Pro 7 よくある質問 FAQ: https://support.linksys.com/kb/article/6899-jp/
+- OpenWrt Wiki - Logging messages: https://openwrt.org/docs/guide-user/base-system/log.essentials
+- OpenWrt Wiki - ubus system: https://openwrt.org/docs/guide-developer/ubus/system
+- OpenWrt Wiki - System configuration: https://openwrt.org/docs/guide-user/base-system/system_configuration
+- OpenWrt Wiki - DHCP and DNS configuration: https://openwrt.org/docs/guide-user/base-system/dhcp
+- OpenWrt Wiki - Firewall configuration: https://openwrt.org/docs/guide-user/firewall/firewall_configuration
 
 ## この連載で使っているOpenWrtルーター
 

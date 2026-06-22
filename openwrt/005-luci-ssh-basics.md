@@ -1,72 +1,495 @@
 <!-- mirror-source: articles/005-luci-ssh-basics.md -->
 
-# LuCIとSSHの基本: LN6001-JPで最初に触る画面とコマンド【OpenWrt集中連載005】
+# LuCIとSSHは怖くない｜LN6001-JPで最初に見る画面とコマンド【OpenWrt集中連載005】
 
-OpenWrtのように細かくカスタマイズできるWi-Fiルーターは面白そうだけど、「日本のIPoE回線で本当に普通に使えるの？」「設定を触りすぎて壊れない？」と不安になる人も多いと思います。
+OpenWrtベースのルーターと聞くと、ちょっと身構える人もいると思います。
 
-この連載では、OpenWrtベースのWi-Fi 7ルーター「Linksys Velop WRT Pro 7」を使いながら、家庭・小規模オフィス・店舗向けに、“実用的なOpenWrt運用” をわかりやすく紹介していきます。
+「黒い画面でコマンドを打たないと使えないのでは？」  
+「LuCIって何？」  
+「SSHで入ったら、何か壊しそう」  
+「普通のWi-Fiルーターみたいに画面で設定できないの？」
 
-LN6001-JPは、日本向けに技適や法令へ対応したモデルで、一般的なWi-Fiルーターのように最初からセットアップ済み。OpenWrt系ルーターとしてはかなり始めやすい部類です。
+大丈夫です。
 
-このシリーズでは、実機開発にも関わった立場から、LuCI・SSH・VLAN・VPN・IPoE/IPv6まわりまで、「結局どう設定するのが現実的なのか？」を、画面操作とCLIの両方でまとめていきます。
+LN6001-JPを最初に触る時、いきなりCLIから入らなくて大丈夫です。
 
-## 要約
+基本は **LuCI** というブラウザ管理画面で見ます。  
+そして、LuCIでは見えにくいログや細かい状態だけ、**SSH** で補います。
 
-LN6001-JPはOpenWrtベースの製品ですが、最初からCLIだけで操作する必要はありません。
+この使い分けが、いちばん無理なく始められます。
 
-基本はLuCIというブラウザ管理画面で確認・設定し、LuCIで見えにくい情報だけSSHで補うくらいが、いちばん無理のない使い方です。
+最初のゴールは、設定を書き換えることではありません。
 
-OpenWrtというと、黒い画面で大量のコマンドを打つイメージを持つ人もいます。もちろんSSHで深く触ることもできますが、家庭や小さなオフィスなら、最初は「状態確認」に使うだけでも十分役に立ちます。
+```txt
+今どうなっているかを見られるようになる
+```
 
-特にトラブル時は、LuCIだけでは見えない情報をSSHで確認できることが大きな強みになります。WANがつながっているか、IPアドレスが取れているか、DNSが動いているか、といった切り分けがしやすくなるためです。
+これだけです。
 
-この記事では、LuCIの主要な画面の見方と、SSHでの接続方法、最初に覚えておくと便利なコマンドをまとめます。
+WANは取れている？  
+端末にIPは配れている？  
+DNSだけおかしい？  
+Wi-Fi側で何かログが出ている？
+
+こういう時に、LuCIとSSHの両方を少し使えると、急に見える景色が変わります。
+
+この記事では、Linksys Velop WRT Pro 7（LN6001-JP）で最初に見るLuCIの画面、SSHでの接続方法、そして設定変更前に覚えておきたい読み取りコマンドを整理します。
+
+> この連載では、Linksys Velop WRT Pro 7（LN6001-JP）を使いながら、家庭・小さなオフィス・店舗でOpenWrtベースルーターを現実的に使う方法をまとめています。  
+> 連載目次: [LN6001-JPで始めるOpenWrtベースルーター実践ガイド](https://note.com/ikmsan/n/ndf7569fea475)
+
+## 今日のゴール
+
+この記事のゴールは、CLIで何でも設定できるようになることではありません。
+
+まずは、ここまでできればOKです。
+
+- LuCIでStatusやInterfacesを見られる
+- WAN / WAN6 / LAN / Wi-Fiの状態をざっくり確認できる
+- SSHでLN6001-JPへログインできる
+- `ubus call system board` や `ifstatus wan` を実行できる
+- `logread` で直近ログを見られる
+- 設定変更前にバックアップを取る感覚が分かる
+
+OpenWrtは、深く触ろうと思えばかなり深いです。
+
+でも最初は、
+
+```txt
+LuCIで見る
+SSHで照合する
+変更前にバックアップする
+```
+
+これだけで十分です。
 
 ![よくある悩み](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/diagram-01.png)
 
-## この記事でわかること
+## 先にざっくり結論
 
-- LuCIとSSHをどう使い分けると分かりやすいか
-- LN6001-JPで最初に見るべき画面とコマンド
-- 設定変更前に確認しておきたいポイント
-- SSHを「変更」ではなく「確認」に使う考え方
+最初は次の3つができれば十分です。
 
-## こんな人に向いています
+1. LuCIの **Status → Overview** と **Network → Interfaces** を見られる
+2. SSHで `root@192.168.1.1` にログインできる
+3. `ubus call system board`、`ifstatus wan`、`logread | tail -n 80` を実行できる
+
+OpenWrtベースのルーターは、LuCIとSSHが別々の世界にあるわけではありません。
+
+LuCIは、ブラウザで見やすくした管理画面です。  
+SSHは、同じルーターの中をコマンドで確認する入口です。
+
+つまり、
+
+```txt
+LuCI = 画面で見る
+SSH = 文字で見る
+```
+
+くらいで考えると分かりやすいです。
+
+最初から `uci set` や `uci commit` をコピペして設定変更する必要はありません。
+
+むしろ、最初はやらなくていいです。
+
+まずは読む。  
+見る。  
+控える。  
+バックアップする。
+
+そこからで大丈夫です。
+
+## こういう人向けです
+
+この記事は、次のような人向けです。
 
 - OpenWrtベース製品を初めて触る
-- LuCIとSSHのどちらから始めるべきか迷っている
-- まずは状態確認だけできるようになりたい
+- LuCIとSSHのどちらから始めればいいか迷っている
+- まず状態確認だけできるようになりたい
+- トラブル時にWAN、DNS、Wi-Fi、DHCPのどこで止まっているか見たい
+- CLIには興味があるけど、設定を壊すのが怖い
+- コマンドは使ってみたいが、最初は読み取りだけにしたい
+- ゲストWi-Fi、VLAN、VPNへ進む前に基本画面を押さえたい
+
+逆に、すでにOpenWrtのCLI運用に慣れている人には、かなり基本寄りです。
+
+でも、慣れている人でも「最初はLuCIで見て、SSHで照合する」という考え方はかなり実用的だと思います。
 
 ![考え方はシンプル](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/diagram-02.png)
 
-## まずはここまでで十分
+## 最初に言葉だけそろえる
 
-この段階では、全部のコマンドを覚える必要はありません。むしろ、最初は「今どうなっているか」を確認できれば十分です。
-
-まずは次の3つで十分です。
-
-1. LuCIのOverviewとInterfacesを見られるようにする
-2. SSHでログインできるようにする
-3. `ubus call system board` と `ifstatus wan` を実行できるようにする
-
-最初は「設定変更」より、「今の状態が分かること」を優先したほうが入りやすいです。
-
-## LuCIで見た内容をSSHで照合する
-
-LN6001-JPでは、LuCIを主役にして、SSHは「画面で見た内容をもう少し詳しく確認する道具」と考えると扱いやすくなります。
-
-この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。まずは次のように、LuCIの画面と読み取りコマンドを対応させて覚えるのがおすすめです。
+最初に出てくる用語だけ、軽く整理しておきます。
 
 ![表画像 table-01](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-01.png)
 
-この表のコマンドは基本的に読み取り用です。最初は `uci set` や `uci commit` を使わなくても、状態を見られるだけで十分役に立ちます。
+最初は全部を覚えなくて大丈夫です。
 
-### 最初に実行する読み取りセット
+まずは、
 
-SSHログインできたら、まずこのセットを実行して、LuCIのOverviewと見比べます。
+```txt
+LuCI = 画面
+SSH = 黒い画面
+UCI = OpenWrtの設定管理
+logread = ログを見る
+```
+
+くらいで十分です。
+
+## LuCIとSSHの使い分け
+
+最初は、LuCIを主役、SSHを補助として考えます。
+
+![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-02.png)
+
+SSHが使えると、一気に“玄人っぽく”見えます。
+
+でも最初の価値はそこではありません。
+
+SSHの本当の便利さは、LuCIだけでは見えにくいログや状態を確認できることです。
+
+つまり、SSHは最初から設定を壊すための道具ではありません。
+
+```txt
+状態を見るための道具
+```
+
+です。
+
+## まずLuCIへログインする
+
+LN6001-JPの管理画面は、ブラウザから開きます。
+
+PCまたはスマートフォンを、LN6001-JPに接続します。
+
+- 有線LAN: LN6001-JPのLANポートとPCをLANケーブルで接続
+- Wi-Fi: 本体底面ラベルに記載されたデフォルトSSIDへ接続
+
+初期設定や設定変更を行う時は、有線LAN接続がおすすめです。
+
+Wi-Fi設定を変更すると、無線接続が一度切れることがあります。
+
+有線のほうが落ち着いて作業できます。
+
+ブラウザのアドレスバーに次を入力します。
+
+```txt
+https://192.168.1.1
+```
+
+ユーザー名は次の通りです。
+
+```txt
+root
+```
+
+パスワードは、本体底面ラベルに記載された初期パスワード、または初期設定後に変更した管理者パスワードです。
+
+初回アクセス時に証明書警告が出ることがあります。
+
+LN6001-JPへ直接つないだ状態で、アクセス先が `https://192.168.1.1` であることを確認したうえで、ブラウザの詳細設定から続行します。
+
+## LuCIで最初に見る画面
+
+LuCIにはたくさんのメニューがあります。
+
+最初から全部を理解しようとしなくて大丈夫です。
+
+まずは、次の2種類に分けて覚えると楽です。
+
+```txt
+状態を見る画面
+設定を変える時に触る画面
+```
+
+最初は「見る画面」を中心にします。
+
+## Status → Overview
+
+ログイン直後にまず見る画面です。
+
+ここは、ルーターの健康診断みたいな場所です。
+
+確認するポイントは次の通りです。
+
+- ホスト名
+- ファームウェアバージョン
+- 稼働時間
+- CPU負荷
+- メモリ使用量
+- WAN / WAN6 / LANの状態
+- WAN側IPアドレス
+- 接続中の端末数
+
+インターネットにつながらない時は、まずここでWAN側にIPアドレスが付いているかを見ます。
+
+WANにIPアドレスが付いていなければ、回線機器、WANケーブル、回線方式、PPPoE/IPoE設定のどこかを見ます。
+
+WANにIPアドレスが付いているのにWebサイトが開けない場合は、DNSやルーティングの可能性を見ます。
+
+「Wi-Fiが悪い」と思っていたら、実はWANやDNSだった、ということはよくあります。
+
+## Network → Interfaces
+
+WAN、WAN6、LANなどの状態を確認する画面です。
+
+確認するポイントは次の通りです。
+
+- WANのProtocol
+- WAN側IPアドレス
+- Gateway
+- DNS
+- WAN6の状態
+- LAN側IPアドレス
+- DHCPで端末にIPアドレスを配っているか
+
+PPPoE回線を使う場合は、この画面からWANのProtocolをPPPoEへ変更し、プロバイダのIDとパスワードを入力します。
+
+ただし、日本のNTTフレッツ系IPoEやIPv4 over IPv6を使う場合は、契約方式やホームゲートウェイの有無によって手順が変わります。
+
+IPoEまわりは別記事で扱います。
+
+この005では、まず
+
+```txt
+WANとWAN6の状態を見られる
+```
+
+ところまでをゴールにします。
+
+## Network → Wireless
+
+Wi-FiのSSID、暗号化方式、パスワード、radioの状態を確認・変更する画面です。
+
+LN6001-JPでは、2.4GHz / 5GHz / 6GHzのradioを扱います。
+
+この画面で見るポイントは次の通りです。
+
+- どのSSIDが有効か
+- どのradioにSSIDが紐づいているか
+- 暗号化方式
+- Wi-Fiパスワード
+- 接続中のクライアント
+- 2.4GHz / 5GHz / 6GHzの状態
+
+SSIDやWi-Fiパスワードを変更する場合は、LuCIで対象のSSIDを選び、**Edit** から変更します。
+
+Wi-Fi設定を反映すると、無線接続は一度切れます。
+
+これは正常です。
+
+新しいSSIDとWi-Fiパスワードで再接続してください。
+
+この連載では、無線の国設定、送信出力、DFS関連の値は変更しません。
+
+## Network → DHCP and DNS
+
+DHCPとDNSまわりを見る画面です。
+
+ここは、端末にIPを配ったり、名前解決を扱ったりする場所です。
+
+確認するポイントは次の通りです。
+
+- 端末へIPアドレスを配っているか
+- DHCPリースの一覧
+- 固定DHCP割り当て
+- DNS転送設定
+- ローカル名解決
+
+家庭や小さなオフィスでは、NAS、プリンター、監視カメラ、ミニPCなどに固定DHCP割り当てを使うことがあります。
+
+ただし、初日は無理に触らなくて大丈夫です。
+
+まずは、接続中の端末にIPアドレスが配られていることを確認できれば十分です。
+
+## Network → Firewall
+
+firewall zoneや転送ルールを見る画面です。
+
+名前がちょっと怖いですが、最初はこう考えれば大丈夫です。
+
+```txt
+LAN = 家や事務所の内側
+WAN = インターネット側
+zone = 部屋
+forwarding = 部屋から部屋へ行ってよいか
+```
+
+ゲストWi-Fi、VLAN、VPNを使い始めると、この画面を見る機会が増えます。
+
+ただし、firewallは設定ミスの影響が大きい場所です。
+
+最初は、
+
+```txt
+LANとWANが分かれている
+ゲストWi-Fiを作る時にzoneを意識する
+```
+
+くらいで十分です。
+
+いきなりCLIからfirewallを書き換えなくて大丈夫です。
+
+## System → Administration
+
+管理者パスワードとSSHアクセスを確認する画面です。
+
+見るポイントは次の通りです。
+
+- Router Password
+- SSH Access
+- SSHの待ち受けポート
+- SSHを受け付けるインターフェース
+- SSH鍵の設定
+
+管理者パスワードは初期設定で変更しておきます。
+
+SSHはLAN側からだけ入れる状態にしておくのがおすすめです。
+
+WAN側からSSHを開ける必要は、家庭や小さなオフィスではほとんどありません。
+
+外出先から管理したい場合は、SSHをインターネットへ直接開けるより、TailscaleやWireGuardなどのVPNを検討したほうが安全に運用しやすいです。
+
+## System → Backup / Flash Firmware
+
+設定バックアップとファームウェア更新の画面です。
+
+ここはかなり大事です。
+
+設定を変更する前は、ここからバックアップを取ります。
+
+手順はシンプルです。
+
+1. **System** → **Backup / Flash Firmware** を開く
+2. **Generate archive** をクリックする
+3. `.tar.gz` ファイルをPCへ保存する
+4. ファイル名に日付と状態を入れて保管する
+
+例:
+
+```txt
+backup-LN6001-before-wifi-change-20260621.tar.gz
+```
+
+バックアップファイルには重要な設定が含まれます。
+
+SNS、公開リポジトリ、ブログ記事の添付などへそのままアップロードしないでください。
+
+OpenWrt系ルーターで一番強い人は、全部の設定を暗記している人ではありません。
+
+変更前にバックアップを取っている人です。
+
+## System → Software
+
+パッケージを確認・追加する画面です。
+
+OpenWrt系では、opkgを使って機能を追加できます。
+
+ただし、最初から大量にパッケージを追加しないほうが安全です。
+
+特にVPNまわりは、LN6001-JPではLinksys公式のVPN Assistantモジュールを使う前提の構成があります。
+
+いきなり一般的なOpenWrt手順をそのまま実行するのではなく、まず公式手順とこの連載の該当記事を確認してください。
+
+パッケージ追加は楽しいですが、ルーターはPCではありません。
+
+必要なものだけ、1つずつ入れるのがおすすめです。
+
+## LuCIで見た内容をSSHで照合する
+
+LuCIで画面を見たあと、SSHでは同じ状態をもう少し詳しく確認します。
+
+![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-03.png)
+
+この表のコマンドは、基本的に読み取り用です。
+
+最初は、設定を変えずに状態を見られるだけでかなり役に立ちます。
+
+## SSHでLN6001-JPに接続する
+
+SSHは、ルーターの中をコマンドで確認するための入口です。
+
+最初は「LuCIで見えない情報を見る道具」と考えます。
+
+## SSH接続前に確認すること
+
+SSH接続前に、次の点を確認します。
+
+- PCがLN6001-JPのLAN側に接続されている
+- 管理者パスワードを控えている
+- LuCIへログインできる
+- SSH AccessがLAN側で有効になっている
+- WAN側からSSHを開けていない
+
+SSHの設定は、LuCIの **System → Administration** で確認できます。
+
+家庭や小さなオフィスでは、SSHはLAN側からだけ使えれば十分です。
+
+## Macから接続する
+
+Macでは、ターミナルを開いて次を実行します。
+
+```sh
+ssh root@192.168.1.1
+```
+
+初回接続時は、接続先を信頼するか聞かれます。
+
+接続先がLN6001-JPであることを確認して、`yes` と入力します。
+
+パスワードを求められたら、管理者パスワードを入力します。
+
+入力中は画面に文字が表示されません。
+
+これは正常です。
+
+## Windowsから接続する
+
+Windows 10/11では、PowerShellまたはWindows TerminalからSSHを使えます。
+
+```powershell
+ssh root@192.168.1.1
+```
+
+PuTTYを使う場合は、次のように設定します。
+
+- Host Name: `192.168.1.1`
+- Port: `22`
+- Connection type: `SSH`
+- Login as: `root`
+
+Windows / MacのSSHログイン手順は、別記事でもう少し丁寧に扱います。
+
+## ホスト鍵の警告が出た時
+
+ルーターを初期化した後や、同じIPアドレスに別の機器をつないだ後は、SSHのホスト鍵警告が出ることがあります。
+
+自分がLN6001-JPへ接続していることを確認したうえで、PC側の古いホスト鍵を削除します。
+
+MacやWindowsのOpenSSHなら、PC側で次を実行します。
+
+```sh
+ssh-keygen -R 192.168.1.1
+```
+
+その後、もう一度SSH接続します。
+
+```sh
+ssh root@192.168.1.1
+```
+
+警告が出た時は、反射的に無視しないでください。
+
+「本当に自分のLN6001-JPへつないでいるか」を確認してから進めます。
+
+## 最初に実行する読み取りセット
+
+SSHでログインできたら、まず次のセットを実行します。
+
+設定は変更しません。
 
 ```sh
 echo "### system"
+date
 ubus call system board
 uptime
 free
@@ -76,6 +499,10 @@ echo "### wan"
 ifstatus wan
 ifstatus wan6
 
+echo "### routes"
+ip route show
+ip -6 route show
+
 echo "### lan clients"
 cat /tmp/dhcp.leases
 
@@ -83,14 +510,152 @@ echo "### recent logs"
 logread | tail -n 80
 ```
 
-この段階では設定は変わりません。トラブル時も、まずはこの出力で「本体」「WAN」「LAN端末」「ログ」を分けて見ます。
+この出力を見るだけで、かなり多くのことが分かります。
 
-### 設定変更前に取る軽いバックアップ
+- ルーターがどのファームウェアで動いているか
+- 起動してからどのくらい経っているか
+- メモリやストレージに余裕があるか
+- WAN / WAN6がどう見えているか
+- デフォルトルートがあるか
+- LAN側端末にIPアドレスが配られているか
+- 直近ログにエラーが出ていないか
 
-LuCIでWi-Fi、DHCP、firewall、LAN IPなどを変更する前に、SSHでテキスト控えを取っておくと、何を変えたか比較しやすくなります。
+トラブル時は、まずこの読み取りセットから始めると、闇雲に設定を触らずに済みます。
+
+## よく使う読み取りコマンド
+
+ここからは、場面別によく使うコマンドを整理します。
+
+すべて最初は読み取り用として使います。
+
+## システム情報を見る
 
 ```sh
-BACKUP_DIR="/root/config-backup-$(date +%Y%m%d-%H%M)"
+ubus call system board
+uptime
+free
+df -h
+```
+
+`ubus call system board` では、ファームウェア情報や機種情報を確認できます。
+
+`uptime` では稼働時間、`free` ではメモリ、`df -h` ではストレージ使用量を見ます。
+
+特に `df -h` は、パッケージ追加前にも見ておくと安心です。
+
+## WAN接続を見る
+
+```sh
+ifstatus wan
+ifstatus wan6
+ip route show
+ip -6 route show
+```
+
+`ifstatus wan` と `ifstatus wan6` は、回線トラブル時にかなり使います。
+
+WAN側IPアドレス、Gateway、DNS、IPv6アドレス、接続状態などを確認できます。
+
+`ip route show` でIPv4の経路、`ip -6 route show` でIPv6の経路を見ます。
+
+## DNSと疎通を見る
+
+```sh
+ping -c 4 8.8.8.8
+ping -c 4 example.com
+nslookup example.com
+```
+
+`8.8.8.8` へpingが通るのに `example.com` が引けない場合は、DNSまわりの問題が疑われます。
+
+どちらも通らない場合は、WAN接続、デフォルトルート、回線機器側を見ます。
+
+「インターネットが死んだ」と見えて、実はDNSだけだった、ということはかなりあります。
+
+## LAN側端末を見る
+
+```sh
+cat /tmp/dhcp.leases
+ip neigh show
+```
+
+`cat /tmp/dhcp.leases` では、DHCPでIPアドレスを取得した端末を確認できます。
+
+`ip neigh show` では、近隣端末のIPアドレスとMACアドレスの対応を確認できます。
+
+スマートフォン、PC、プリンター、NAS、カメラなどが想定通り見えているかを確認する時に使います。
+
+## Wi-Fi状態を見る
+
+```sh
+uci show wireless | grep -E 'ssid|encryption|disabled|network'
+wifi status
+iw dev
+```
+
+SSID、暗号化方式、有効/無効状態、radioの状態、無線インターフェースを確認します。
+
+この連載では、無線の国設定、送信出力、DFS関連の値は変更しません。
+
+Wi-Fiの変更は、最初はLuCIの **Network → Wireless** から行うのがおすすめです。
+
+CLIでは、まず読むだけで十分です。
+
+## DHCP / DNS設定を見る
+
+```sh
+uci show dhcp
+cat /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null
+cat /etc/resolv.conf
+logread | grep -i dnsmasq | tail -n 50
+```
+
+DHCPやDNSまわりの設定、上流DNS、dnsmasq関連ログを確認します。
+
+DNS広告ブロックや固定DHCP割り当てを使うようになると、このあたりを見る機会が増えます。
+
+## firewall設定を見る
+
+```sh
+uci show firewall
+iptables-save 2>/dev/null | head -n 120 || true
+ip6tables-save 2>/dev/null | head -n 120 || true
+```
+
+OpenWrt系では、ファームウェア世代によってfirewallの実装や表示方法が変わることがあります。
+
+最初は `uci show firewall` で設定を見るだけで十分です。
+
+`iptables-save` や `ip6tables-save` は、実際に展開されたルールを確認したい中上級者向けです。
+
+この段階でfirewallをCLIから書き換える必要はありません。
+
+## ログを見る
+
+```sh
+logread | tail -n 100
+logread | grep -i netifd | tail -n 50
+logread | grep -i dnsmasq | tail -n 50
+logread | grep -i wireless | tail -n 50
+logread | grep -iE 'error|fail|warn' | tail -n 50
+```
+
+ログを見ると、LuCIだけでは見えにくいヒントが出てきます。
+
+- WAN接続が上がっているか
+- DHCPが動いているか
+- DNSでエラーが出ていないか
+- Wi-Fi radioが再起動していないか
+- firewallやパッケージでエラーが出ていないか
+
+困った時は、まず `logread | tail -n 100` だけでも見てみる価値があります。
+
+## 設定変更前に取る軽い控え
+
+LuCIでWi-Fi、DHCP、firewall、LAN IPなどを変更する前に、SSHでテキスト控えを取っておくと比較しやすくなります。
+
+```sh
+BACKUP_DIR="/root/config-check-$(date +%Y%m%d-%H%M)"
 mkdir -p "$BACKUP_DIR"
 
 for cfg in network wireless firewall dhcp system; do
@@ -98,402 +663,318 @@ for cfg in network wireless firewall dhcp system; do
   uci show "$cfg" > "$BACKUP_DIR/$cfg.uci.txt"
 done
 
+ubus call system board > "$BACKUP_DIR/system-board.json"
+ifstatus wan > "$BACKUP_DIR/ifstatus-wan.json"
+ifstatus wan6 > "$BACKUP_DIR/ifstatus-wan6.json"
+logread | tail -n 200 > "$BACKUP_DIR/logread-tail.txt"
+
 ls -l "$BACKUP_DIR"
 ```
 
-本格的な復元用には、LuCIの **System** → **Backup / Flash Firmware** からPCへバックアップを保存しておきます。SSHのバックアップは「差分確認用の控え」と考えると分かりやすいです。
+これは復元用の正式バックアップではなく、変更前の控えです。
 
-## 用語ミニ解説
+復元用には、LuCIの **System → Backup / Flash Firmware** から `Generate archive` を使ってPCへ保存します。
 
-- LuCI: ブラウザで開くOpenWrt系の管理画面です。
-- SSH: ルーターへ文字コマンドでログインする方法です。状態確認や詳細ログ確認で役立ちます。
-- CLI: コマンドライン操作のことです。
-- UCI: OpenWrt系の設定管理の仕組みです。`uci show network` のように使います。
-- logread: ルーターのログを見るコマンドです。トラブル時の手がかりになります。
-
-## LuCIの主要メニューと使い方
-
-LuCIは、OpenWrt系ルーターをブラウザから管理するための画面です。
-
-最初は全部を理解しようとしなくて大丈夫です。まずは「どこを見るとWAN状態が分かるか」「どこでWi‑Fi設定を変えるか」だけ覚えるとかなり扱いやすくなります。
-
-### Status（概要）
-
-ログイン直後に表示されます。
-
-**確認できる主な情報:**
-- ルーター名・ファームウェアバージョン
-- CPU負荷・メモリ使用量
-- 稼働時間
-- WAN/LAN/WAN6の接続状態・IPアドレス
-- 接続中の端末数
-
-インターネットにつながらない時は、まずここのWAN/WAN6の状態を確認します。
-
-「WANにIPアドレスが付いているか」を見るだけでも、回線側なのかWi‑Fi側なのかの切り分けがかなり楽になります。
-
-### Network > Interfaces（インターフェース状態）
-
-**確認・設定できること:**
-- WAN / WAN6 / LAN の状態と詳細
-- IPアドレス、GW、DNS
-- PPPoE / DHCP / 静的IP の切り替え
-
-OpenWrt系では、ネットワーク設定の中心になる画面です。回線がつながらない時も、まずここを見ることが多くなります。
-
-**PPPoE設定の手順（PPPoE回線の場合）:**
-1. **Network** → **Interfaces** を開く
-2. **WAN** の **Edit** をクリック
-3. **Protocol** を `PPPoE` に変更
-4. **PAP/CHAP username** にプロバイダのID、**Password** にパスワードを入力
-5. **Save & Apply** をクリック
-6. WAN statusが `Connected` になることを確認
-
-PPPoE利用時は、契約書やプロバイダメールに書かれている接続IDとパスワードが必要です。
-
-### Network > Wireless（Wi-Fi設定）
-
-**確認・設定できること:**
-- 2.4GHz / 5GHz / 6GHz の各SSIDの状態
-- SSID名・暗号化方式・パスワードの変更
-- 無線の有効/無効の切り替え
-
-家庭で触る機会が最も多いのがこの画面です。SSID変更、Wi‑Fiパスワード変更、ゲストWi‑Fi追加などもここから行います。
-
-**SSID設定の手順:**
-1. **Network** → **Wireless** を開く
-2. 変更したいSSIDの **Edit** をクリック
-3. **Interface Configuration** タブ:
-   - **ESSID**: Wi-Fi名を入力
-   - **Mode**: `Access Point`（通常はそのまま）
-4. **Wireless Security** タブ:
-   - **Encryption**: `WPA2-PSK` または `WPA3-SAE`
-   - **Key**: Wi-Fiパスワード（8文字以上）
-5. **Save** → **Apply**
-
-### Network > Firewall（ファイアウォール）
-
-**確認・設定できること:**
-- zone（LAN/WAN/Guest等）の設定
-- zone間の転送ルール
-- ポートフォワーディング
-
-Guest Wi‑FiやVLANを使い始めると、この画面を見る機会が増えます。最初は「LANとWANを分けている設定」くらいの理解でも十分です。
-
-### System > Backup / Flash Firmware（バックアップ・更新）
-
-設定変更前は、できるだけここからバックアップを取るようにします。
-
-**バックアップ手順:**
-1. **System** → **Backup / Flash Firmware** を開く
-2. **Generate archive** ボタンをクリック
-3. `.tar.gz` ファイルをPCに保存
-
-**ファームウェア更新手順:**
-1. Linksys公式からファームウェアをダウンロード
-2. **Flash new firmware image** セクションで **Choose File** をクリック
-3. ダウンロードしたファイルを選択
-4. **Flash image** をクリック
-5. 確認画面で **Proceed** をクリック（接続が切れる）
-
-ファームウェア更新中は電源を切らず、有線LAN接続で行うほうが安全です。
-
-### System > Administration（管理設定）
-
-**設定できること:**
-- 管理パスワード（Router Password セクション）
-- SSH アクセス設定（SSH Access セクション）
-  - **Interface**: どのインターフェースからSSHを受け付けるか（初期はLANのみを推奨）
-  - **Port**: SSHポート番号（デフォルト22）
-
-SSHを有効にしたまま使う場合でも、WAN側からSSHを開けない構成にしておくほうが安心です。
-
-## SSHでLN6001-JPに接続する
-
-SSHは、ルーターの中を少し詳しく見るための入口です。
-
-最初は「CLIで全部設定する」ためではなく、「LuCIで見えない状態を確認する」くらいの感覚で十分です。
-
-### 接続前の確認
-
-SSHは初期状態で有効になっています。LuCIの **System** → **Administration** → **SSH Access** セクションで接続許可インターフェースを確認できます。
-
-セキュリティ上、SSHアクセスはLANポートのみに限定しておくことをおすすめします（WANからのSSHは無効のまま）。
-
-普段使いでは、家やオフィスの内部ネットワークからだけ接続できれば十分なケースがほとんどです。
-
-### Macからの接続
+必要なら、PC側から次のように取得します。
 
 ```sh
-ssh root@192.168.1.1
-# パスワードを入力（管理パスワードと同じ）
+scp -r root@192.168.1.1:/root/config-check-YYYYMMDD-HHMM ./
 ```
 
-### Windowsからの接続
+この控えにもSSID、パスワード、ネットワーク設定などが含まれることがあります。
 
-**Windows 10/11の場合（OpenSSH使用）:**
-1. PowerShellまたはコマンドプロンプトを開く
-2. 以下を実行:
+公開しないように注意してください。
 
-```powershell
-ssh root@192.168.1.1
-```
+## UCIは「読む」から始める
 
-**PuTTY使用の場合:**
-- Hostname: `192.168.1.1`
-- Port: `22`
-- Connection type: `SSH`
-- Login as: `root`
+UCIはOpenWrt系の設定管理の中心です。
 
-詳細は別記事「SSH接続: WindowsとMacからLN6001-JPへログインする」を参照してください。
+ただし、最初からUCIで設定を書き換える必要はありません。
 
-### 接続確認
-
-ログイン成功後、プロンプトが表示されます:
-
-```
-
-     MM           NM                    MMMMMMM          M       M
-   $MMMMM        MMMMM                MMMMMMMMMMM      MMM     MMM
-  MMMMMMMM     MM MMMMM.              MMMMM:MMMMMM:   MMMM   MMMMM
-MMMM= MMMMMM  MMM   MMMM       MMMMM   MMMM  MMMMMM   MMMM  MMMMM'
-MMMM=  MMMMM MMMM    MM       MMMMM    MMMM    MMMM   MMMMNMMMMM
-MMMM=   MMMM  MMMMM          MMMMM     MMMM    MMMM   MMMMMMMM
-MMMM=   MMMM   MMMMMM       MMMMM      MMMM    MMMM   MMMMMMMMM
-MMMM=   MMMM     MMMMM,    NMMMMMMMM   MMMM    MMMM   MMMMMMMMMMM
-MMMM=   MMMM      MMMMMM   MMMMMMMM    MMMM    MMMM   MMMM  MMMMMM
-MMMM=   MMMM   MM    MMMM    MMMM      MMMM    MMMM   MMMM    MMMM
-MMMM$ ,MMMMM  MMMMM  MMMM    MMM       MMMM   MMMMM   MMMM    MMMM
-  MMMMMMM:      MMMMMMM     M         MMMMMMMMMMMM  MMMMMMM MMMMMMM
-    MMMMMM       MMMMN     M           MMMMMMMMM      MMMM    MMMM
-     MMMM          M                    MMMMMMM        M       M
-       M
- ...
-
-root@LN6001-JP:~#
-```
-
-この画面が出ればSSHログイン成功です。最初は怖く見えるかもしれませんが、ここから状態確認コマンドを少しずつ覚えていけば十分です。
-
-## SSHでよく使うコマンド
-
-最初は全部覚える必要はありません。
-
-まずは「WANがつながっているか」「IPアドレスが付いているか」「ログにエラーが出ていないか」を確認できるだけでも、LuCIだけの時よりかなり切り分けしやすくなります。
-
-### システム情報の確認
+まずは読むところから始めます。
 
 ```sh
-# ファームウェア・ハードウェア情報
-ubus call system board
-
-# CPU・メモリ・稼働時間
-cat /proc/uptime
-free
-
-# ストレージ使用量
-df -h
-```
-
-### ネットワーク状態の確認
-
-```sh
-# WAN状態を詳細確認（JSONで出力）
-ifstatus wan
-ifstatus wan6
-
-# IPアドレス一覧
-ip addr show
-
-# ルーティングテーブル
-ip route show
-
-# DNS設定確認
-cat /etc/resolv.conf
-
-# 接続中のDHCPリース（端末一覧）
-cat /tmp/dhcp.leases
-```
-
-`ifstatus wan` と `ifstatus wan6` は特に重要です。IPアドレス取得状況、GW、DNS、IPv6状態などをまとめて確認できます。
-
-### 設定内容の確認（UCI）
-
-```sh
-# ネットワーク設定全体
 uci show network
-
-# 無線設定全体
 uci show wireless
-
-# ファイアウォール設定
 uci show firewall
-
-# DHCP設定
 uci show dhcp
+uci show system
+```
 
-# 特定の設定だけ確認
+特定の値だけ見ることもできます。
+
+```sh
 uci get network.lan.ipaddr
 uci show wireless | grep ssid
 ```
 
-### ログの確認
+UCIで設定を変更する時は、基本的に次の流れになります。
 
 ```sh
-# 最近のシステムログ（100行）
-logread | tail -n 100
+uci set ...
+uci changes
+uci commit ...
+/etc/init.d/... restart
+```
 
-# Wi-Fi関連ログのみ
-logread | grep -i wireless | tail -n 50
+ただし、この流れは慣れてからで十分です。
 
-# DHCP関連ログのみ
-logread | grep -i dnsmasq | tail -n 50
+慣れないうちは、CLIでは `uci show` と `uci get` だけを使い、設定変更はLuCIで行うほうが安全です。
 
-# WAN接続関連ログ
+ここで無理にCLI職人を目指さなくて大丈夫です。
+
+## `Save` と `Save & Apply` の違い
+
+LuCIを使う時に少し混乱しやすいのが、`Save` と `Save & Apply` の違いです。
+
+ざっくり言うと、次のイメージです。
+
+- Save: 画面上で変更を保存候補にする
+- Save & Apply: 実際の設定として反映する
+
+SSIDやWi-Fiパスワードを変更しただけでは、まだ反映されていないことがあります。
+
+画面上部に保留中の変更が出ている場合は、内容を確認してから **Save & Apply** します。
+
+反映後、Wi-Fiやネットワークが一時的に切れることがあります。
+
+特にWireless、Network、Firewallの変更では、切断が発生しても慌てず、少し待ってから再接続します。
+
+ここで焦ってリセットボタンを押したくなります。
+
+分かります。
+
+でも、まだ押さなくて大丈夫です。
+
+まずは再接続先のSSIDや、新しいLAN IPを確認します。
+
+## 最初にやらないほうがよいこと
+
+LuCIとSSHに慣れてくると、いろいろ触りたくなります。
+
+ただ、最初の段階では次の操作は避けたほうが安全です。
+
+- WAN側からSSHを開ける
+- 無線の国設定を変更する
+- 送信出力を変更する
+- DFS関連の値を変更する
+- firewallをCLIで一括変更する
+- VLANを一気に作る
+- 長いUCIスクリプトを中身を読まずに貼り付ける
+- opkgで大量のパッケージを入れる
+- VPNを複数方式まとめて試す
+- バックアップなしでLAN IPアドレスを変更する
+
+OpenWrtベースのルーターは自由度が高いぶん、1つの変更が複数の場所に影響します。
+
+最初は、
+
+```txt
+読む
+控える
+1つ変える
+確認する
+バックアップする
+```
+
+の順番で進めるのが安全です。
+
+## トラブル時の見方
+
+LuCIとSSHを使えるようになると、トラブルの切り分けがかなり楽になります。
+
+## インターネットにつながらない
+
+まずはLuCIで **Status → Overview** と **Network → Interfaces** を見ます。
+
+SSHでは次を確認します。
+
+```sh
+ifstatus wan
+ifstatus wan6
+ip route show
+ip -6 route show
+ping -c 4 8.8.8.8
+ping -c 4 example.com
 logread | grep -i netifd | tail -n 50
-
-# エラーのみ抽出
-logread | grep -i error | tail -n 50
 ```
 
-困った時は、まず `logread | tail -n 100` を見るだけでもかなり情報が拾えます。WAN接続、DNS、Wi‑Fi、DHCP関連のエラーが見つかることも多いです。
+WANにIPアドレスがない場合は、WANケーブル、回線機器、回線方式を見ます。
 
-### パッケージ管理（opkg）
+IPアドレスがあるのに名前解決できない場合は、DNSを見ます。
+
+## Wi-Fiにはつながるが通信できない
+
+まず、端末がIPアドレスを取れているかを見ます。
 
 ```sh
-# インストール済みパッケージ一覧
-opkg list-installed
-
-# パッケージを検索
-opkg list | grep -i adblock
-
-# パッケージをインストール（例）
-opkg update
-opkg install adblock luci-app-adblock
-
-# パッケージをアンインストール
-opkg remove adblock
+cat /tmp/dhcp.leases
+ip neigh show
+logread | grep -i dnsmasq | tail -n 50
 ```
 
-WireGuard/TailscaleはLinksys公式VPNアシスタントモジュールを使います。`opkg install luci-app-wireguard` を前提にしないでください。
+端末がDHCPリースに出てこない場合は、Wi-Fi接続、DHCP、SSIDの紐づくネットワークを見ます。
 
-OpenWrt系では `opkg install` で色々追加できますが、最初から大量にパッケージを入れないほうが安定して使いやすいです。
+端末にIPアドレスはあるのに通信できない場合は、DNS、gateway、firewallを見ます。
 
-### 設定のバックアップと復元
+## SSHでログインできない
+
+確認する順番は次の通りです。
+
+1. PCがLN6001-JPのLAN側に接続されているか
+2. ルーターのIPアドレスが `192.168.1.1` のままか
+3. 管理者パスワードが合っているか
+4. LuCIの **System → Administration** でSSH Accessが有効か
+5. ホスト鍵警告で止まっていないか
+6. 既存ルーターやHGWとIPアドレスが重複していないか
+
+IPアドレスを変更した場合は、新しいアドレスで接続します。
 
 ```sh
-# 設定ファイルをバックアップ
-cp /etc/config/network /etc/config/network.backup.$(date +%Y%m%d)
-cp /etc/config/wireless /etc/config/wireless.backup.$(date +%Y%m%d)
-cp /etc/config/firewall /etc/config/firewall.backup.$(date +%Y%m%d)
-cp /etc/config/dhcp /etc/config/dhcp.backup.$(date +%Y%m%d)
-
-# バックアップから復元
-cp /etc/config/network.backup.20260507 /etc/config/network
-/etc/init.d/network restart
+ssh root@192.168.10.1
 ```
 
-## UCIで設定を変更する
+「SSHできない」のではなく、接続先IPが変わっているだけのこともあります。
 
-UCIはOpenWrt系の設定管理の中心です。
+## LuCIで変更を反映したら接続が切れた
 
-ただし、最初からCLIだけで設定を書き換える必要はありません。まずは `uci show` や `uci get` で現在設定を読むことから始めると、安全に慣れていけます。
+Wi-Fi名、Wi-Fiパスワード、LAN IPアドレス、firewall、VLANを変更すると、接続が切れることがあります。
 
-### 基本的な変更の流れ
+これは必ずしも失敗ではありません。
 
-```sh
-# 1. 変更前に現在の設定を確認
-uci show wireless | grep ssid
+変更内容に応じて、次のように対応します。
 
-# 2. バックアップを取る
-cp /etc/config/wireless /etc/config/wireless.backup.$(date +%Y%m%d)
+![表画像 table-04](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-04.png)
 
-# 3. 実際のSSID変更はLuCIのWireless画面で行う
-```
+変更前にバックアップを取っておくと、落ち着いて戻しやすくなります。
 
-Wi‑FiのUCIセクション名は環境で変わることがあります。
+## OpenWrtの設定ファイルをざっくり理解する
 
-SSHに慣れるまでは、CLIでは確認とバックアップまでに留め、変更はLuCIで行うほうが安全です。
+OpenWrt系の設定は、主に `/etc/config/` 配下にあります。
 
-### よく使う変更コマンド
+![表画像 table-05](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-05.png)
 
-```sh
-# タイムゾーン変更
-uci set system.@system[0].timezone='JST-9'
-uci set system.@system[0].zonename='Asia/Tokyo'
-uci commit system
-/etc/init.d/system restart
+LuCIで変更した内容も、裏側ではこれらの設定に反映されます。
 
-# ホスト名変更
-uci set system.@system[0].hostname='LN6001-home'
-uci commit system
+つまり、LuCIとSSHは別世界ではありません。
 
-# LAN IP変更
-uci set network.lan.ipaddr='192.168.10.1'
-uci commit network
-/etc/init.d/network restart
-```
+同じ設定を、画面で見るか、テキストで見るかの違いです。
 
-## LuCIとSSHの使い分けの目安
-
-![表画像 table-02](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-02.png)
-
-最初は「LuCI中心、SSHは補助」くらいで考えると入りやすいです。
-
-SSHが役立つのは、LuCIで見えない詳細ログや状態確認をしたい時です。特に回線トラブル時は、SSHが使えるだけで切り分けしやすさがかなり変わります。
-
-## OpenWrtの設定構造を理解する
-
-OpenWrtの設定は `/etc/config/` 配下のテキストファイルで管理されています。
-
-![表画像 table-03](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/table-03.png)
-
-LuCIで変更した内容も、裏側ではこれらのファイルに反映されます。`uci show <config>` で現在の設定を確認できます。
-
-つまり、LuCIとSSHは別物ではなく、同じ設定を違う見え方で触っているイメージです。
+ここが分かると、OpenWrtが急に怖くなくなります。
 
 ## まとめ
 
-最初の成功条件としては、次の3つが見えれば十分です。最初からCLIを全部覚える必要はありません。
+LN6001-JPでLuCIとSSHを使い始める時は、次の順番で考えると迷いにくくなります。
 
-- LuCI の主要画面で WAN、LAN、Wi-Fi の状態が追える
-- SSH でログインして基本コマンドを打てる
-- 設定変更前にバックアップを取る流れが分かっている
+1. LuCIで全体を見る
+2. SSHで詳しい状態を読む
+3. 設定変更前にバックアップを取る
+4. 変更はまずLuCIで行う
+5. CLIでの変更は慣れてからにする
 
-LuCIとSSHの使い方の要点:
+最初の成功条件は、次の3つです。
 
-1. **LuCI**: 日常的な設定変更・状態確認に使う
-2. **SSH**: 詳細ログ確認・状態確認・トラブル対応に使う
-3. **UCI**: 設定の確認・変更に使う（変更後は `uci commit` が必要）
-4. **設定変更前**: 必ずバックアップを取る
+- LuCIのOverviewとInterfacesでWAN/LAN/Wi-Fiの状態を見られる
+- SSHでログインして読み取りコマンドを実行できる
+- 設定変更前にLuCIバックアップとテキスト控えを残せる
 
-最初はLuCIで状態を確認し、必要な場面だけSSHを使う流れで十分です。
+CLIは、難しくするためのものではありません。
 
-CLIは「全部を難しくするもの」ではなく、「見えなかった情報を確認できる道具」と考えると入りやすくなります。
+見えなかった情報を見えるようにするための道具です。
+
+この感覚を持っておくと、IPoE、ゲストWi-Fi、VLAN、VPN、トラブル対応の記事へ進んだ時にもかなり楽になります。
 
 ![まず見るところ](https://raw.githubusercontent.com/ikm-san/blog/main/openwrt/assets/005/diagram-03.png)
+
+## 次に読むなら
+
+LuCIとSSHの基本が見えてきたら、次は目的に合わせて進みます。
+
+- [SSH接続: WindowsとMacからLN6001-JPへログインする](https://note.com/ikmsan/n/na751d7336b87)
+- [SSHで見る基本情報](https://note.com/ikmsan/n/n99897dd3cae6)
+- [LN6001-JP初期設定チェックリスト](https://note.com/ikmsan/n/n50a565a008a0)
+- [設定バックアップと復元](https://note.com/ikmsan/n/n3c25190a8e94)
+- [つながらない時の切り分け](https://note.com/ikmsan/n/n1ab2d47c6d10)
+
+CLIに慣れたい人は、Windows/MacのSSHログイン記事へ。
+
+トラブル対応の見方を深めたい人は、SSHで見る基本情報と、つながらない時の切り分けへ進むと読みやすいです。
+
+## CLI例の前提
+
+この記事のCLI例は、LN6001-JPのOpenWrtベースのver 1.2.0.15ファームウェアを前提にしています。
+
+無線の国設定、送信出力、DFS関連の値は変更しません。
+
+ファームウェア更新で画面名やコマンドの出力が変わることがあります。
+
+記事の内容と実際の画面が少し違う場合は、まずバックアップを取り、Linksys公式サポートの最新情報も確認してください。
 
 ## よくある質問
 
 ### LN6001-JPは最初からSSHで触るべき？
 
-最初はLuCI中心で十分です。SSHは詳細な状態確認やトラブル時の切り分けに使う、と分けるほうが入りやすくなります。
+いいえ。
+
+最初はLuCI中心で十分です。
+
+SSHは、LuCIだけでは見えにくいログや詳細状態を確認するための補助として使うのがおすすめです。
 
 ### LuCIとSSHはどちらが安全？
 
-日常的な設定変更はLuCIのほうが安全です。SSHは便利ですが、設定ファイルを直接触る分だけミスの影響も大きくなります。
+日常的な設定変更はLuCIのほうが安全に進めやすいです。
 
-最初は「SSHで読む、変更はLuCI」という分け方がおすすめです。
+SSHは便利ですが、設定ファイルを直接触れるぶん、ミスの影響も大きくなります。
 
-### LN6001-JPでまず覚えるべきSSHコマンドは？
+最初は「SSHで読む、変更はLuCI」という分け方が分かりやすいです。
 
-`ubus call system board`、`ifstatus wan`、`cat /tmp/dhcp.leases`、`logread | tail -n 50` あたりからで十分です。
+### 最初に覚えるSSHコマンドは？
+
+まずは次の4つで十分です。
+
+```sh
+ubus call system board
+ifstatus wan
+cat /tmp/dhcp.leases
+logread | tail -n 80
+```
+
+この4つで、本体情報、WAN状態、LAN側端末、直近ログを確認できます。
+
+### `uci set` は使わないほうがいい？
+
+慣れるまでは、設定変更には使わなくて大丈夫です。
+
+`uci show` や `uci get` で読むことから始め、変更はLuCIで行うほうが安全です。
+
+UCIで変更する場合は、必ずバックアップを取り、`uci changes` で差分を確認してから反映します。
+
+### SSHをWAN側から開けてもいい？
+
+おすすめしません。
+
+家庭や小さなオフィスでは、SSHはLAN側からだけ使えれば十分です。
+
+外出先から管理したい場合は、SSHをインターネットへ直接開けるより、VPN経由で入る構成を検討してください。
+
+### パッケージはopkgで自由に入れていい？
+
+OpenWrt系なのでopkgで機能追加できますが、最初から大量に入れるのはおすすめしません。
+
+特にVPNやIPoEまわりは、LN6001-JP向けの公式手順や追加モジュールがある場合があります。
+
+まずは必要な機能を1つずつ追加し、変更前後でバックアップを取ります。
 
 ## 参考リンク
 
 - Linksys Velop WRT Pro 7 製品情報 ＆ FAQ: https://support.linksys.com/kb/article/6274-jp/
-- Linksys OpenWRT web interface login: https://support.linksys.com/kb/article/223-en/?section_id=175
-- Linksys OpenWRT SSH setup: https://support.linksys.com/kb/article/226-en/?section_id=175
+- Velop WRT Pro 7 OpenWrt ルーターのWEB管理画面へログインする方法: https://support.linksys.com/kb/article/7038-jp/
+- Velop WRT Pro 7 OpenWrt ルーターのWiFi設定の変更方法: https://support.linksys.com/kb/article/7037-jp/
+- Velop WRT Pro 7 OpenWrt ルーターの設定をファイル保存・復元する方法: https://support.linksys.com/kb/article/7041/
+- Linksys MBE70 WRT Pro 7 FAQs: https://support.linksys.com/kb/article/217-en/?section_id=175
+- OpenWrt User Guide: https://openwrt.org/docs/guide-user/start
+- OpenWrt Wiki - Opkg package manager: https://openwrt.org/docs/guide-user/additional-software/opkg
+- OpenWrt Wiki - Logging messages: https://openwrt.org/docs/guide-user/base-system/log.essentials
 
 ## この連載で使っているOpenWrtルーター
 
